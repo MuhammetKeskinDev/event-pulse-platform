@@ -1,12 +1,33 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import type { MetricsResponse, ThroughputPoint } from '../types/metrics'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
+const WS_BASE = import.meta.env.VITE_WS_BASE ?? ''
 const MAX_POINTS = 360
+
+export type WsConnectionState =
+  | 'connecting'
+  | 'open'
+  | 'reconnecting'
+  | 'closed'
 
 function metricsUrl(): string {
   return `${API_BASE}/api/v1/metrics`
+}
+
+function wsEventsUrl(): string {
+  if (WS_BASE) {
+    let base = WS_BASE.replace(/\/$/, '')
+    if (base.startsWith('https://')) {
+      base = `wss://${base.slice(8)}`
+    } else if (base.startsWith('http://')) {
+      base = `ws://${base.slice(7)}`
+    }
+    return `${base}/ws/events`
+  }
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}/ws/events`
 }
 
 export function useMetrics() {
@@ -17,8 +38,7 @@ export function useMetrics() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(10)
-  const pollMsRef = useRef(10_000)
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [wsState, setWsState] = useState<WsConnectionState>('connecting')
 
   const fetchOnce = useCallback(async () => {
     const res = await fetch(metricsUrl())
@@ -29,7 +49,6 @@ export function useMetrics() {
     setMetrics(data)
     const sec = data.suggested_poll_interval_seconds
     if (typeof sec === 'number' && sec > 0 && Number.isFinite(sec)) {
-      pollMsRef.current = Math.round(sec * 1000)
       setPollIntervalSeconds(sec)
     }
     setThroughputSeries((prev) => {
@@ -49,45 +68,91 @@ export function useMetrics() {
 
   useEffect(() => {
     let cancelled = false
+    let socket: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let attempt = 0
 
-    const clearTimer = () => {
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
+    const clearReconnect = () => {
+      if (reconnectTimer !== null) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
       }
     }
 
-    const scheduleNext = (delay: number) => {
-      clearTimer()
-      timeoutRef.current = setTimeout(() => {
-        void tick()
-      }, delay)
-    }
-
-    const tick = async () => {
+    const scheduleReconnect = () => {
       if (cancelled) {
         return
       }
+      clearReconnect()
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
+        connect()
+      }, delay)
+    }
+
+    const connect = () => {
+      if (cancelled) {
+        return
+      }
+      clearReconnect()
+      setWsState(attempt === 0 ? 'connecting' : 'reconnecting')
       try {
-        await fetchOnce()
-        setError(null)
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load metrics')
+        socket = new WebSocket(wsEventsUrl())
+      } catch {
+        attempt += 1
+        scheduleReconnect()
+        return
+      }
+
+      socket.onopen = () => {
+        if (cancelled) {
+          return
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-          scheduleNext(pollMsRef.current)
+        attempt = 0
+        setWsState('open')
+        void fetchOnce()
+          .then(() => {
+            setError(null)
+            setLoading(false)
+          })
+          .catch((e) => {
+            setError(e instanceof Error ? e.message : 'Failed to load metrics')
+            setLoading(false)
+          })
+      }
+
+      socket.onmessage = () => {
+        if (cancelled) {
+          return
         }
+        void fetchOnce()
+          .then(() => setError(null))
+          .catch((e) =>
+            setError(e instanceof Error ? e.message : 'Failed to load metrics'),
+          )
+      }
+
+      socket.onclose = () => {
+        if (cancelled) {
+          return
+        }
+        setWsState('closed')
+        attempt += 1
+        scheduleReconnect()
+      }
+
+      socket.onerror = () => {
+        socket?.close()
       }
     }
 
-    void tick()
+    connect()
 
     return () => {
       cancelled = true
-      clearTimer()
+      clearReconnect()
+      socket?.close()
     }
   }, [fetchOnce])
 
@@ -97,5 +162,7 @@ export function useMetrics() {
     error,
     loading,
     pollIntervalSeconds,
+    wsState,
+    transport: 'websocket' as const,
   }
 }

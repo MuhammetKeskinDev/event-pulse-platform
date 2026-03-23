@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 8 |
+| **Total AI interactions logged** | 9 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~215 minutes |
+| **Estimated time saved** | ~245 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -157,6 +157,24 @@
 **Validation:** `npx tsc --noEmit`; migrasyon konteynerde uygulandı.
 
 **Quality:** 5/5 — Zaman serisi tabanına uygun basit 3σ dakika kuralı.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-009 | 2026-03-23 18:15 PM | Cursor
+
+**Category:** WebSocket realtime (FR-06)
+
+**Context:** `@fastify/websocket` ile `/ws/events`; worker → Redis PUB (`eventpulse:events_live`) → API duplicate subscriber → WS broadcast; frontend’de polling kaldırılıp olay başına metrik yenileme.
+
+**Prompt:** FR-06 WebSocket entegrasyonu, worker başarılı işlemde yayın, dashboard’da WS ile anlık grafik; AI-009.
+
+**AI Output Summary:** `src/constants/realtime.ts`, `src/realtime/ws-hub.ts`, `app.ts` (websocket + Redis sub + hooks), worker `publish`, `frontend` `useMetrics` (WS + exponential reconnect), Vite `/ws` proxy, `docs/api.md` Realtime bölümü.
+
+**Your Modifications:** —
+
+**Validation:** `npx tsc --noEmit` (backend); `npm run build` (frontend).
+
+**Quality:** 5/5 — Ayrı worker süreci ile uyumlu pub/sub köprüsü.
 
 **Time Impact:** Saved ~30 minutes.
 

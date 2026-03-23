@@ -3,10 +3,17 @@ import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import postgres from "@fastify/postgres";
 import redis from "@fastify/redis";
+import websocket from "@fastify/websocket";
 import Fastify from "fastify";
+import type Redis from "ioredis";
 import { z } from "zod";
 
+import { EVENTS_LIVE_CHANNEL } from "./constants/realtime";
 import { ingestionEventSchema } from "./schemas/ingestion-events";
+import {
+  broadcastToWebSocketClients,
+  registerWebSocketClient,
+} from "./realtime/ws-hub";
 
 const EVENTS_STREAM = "events_stream";
 
@@ -75,12 +82,48 @@ async function buildServer() {
     enableReadyCheck: true,
   });
 
+  await app.register(websocket);
+
+  let redisSubscriber: Redis | null = null;
+
+  app.addHook("onReady", async () => {
+    redisSubscriber = app.redis.duplicate();
+    await redisSubscriber.subscribe(EVENTS_LIVE_CHANNEL);
+    redisSubscriber.on("message", (_channel, message) => {
+      broadcastToWebSocketClients(message);
+    });
+    app.log.info({ channel: EVENTS_LIVE_CHANNEL }, "ws_redis_subscriber_ready");
+  });
+
+  app.addHook("onClose", async () => {
+    if (redisSubscriber !== null) {
+      try {
+        await redisSubscriber.unsubscribe(EVENTS_LIVE_CHANNEL);
+      } catch {
+        /* ignore */
+      }
+      redisSubscriber.disconnect();
+      redisSubscriber = null;
+    }
+  });
+
+  app.get("/ws/events", { websocket: true }, (socket, req) => {
+    registerWebSocketClient(socket);
+    socket.on("error", (err) => {
+      req.log.error({ err }, "ws_client_error");
+    });
+  });
+
   app.get("/", async (_request, reply) => {
     return reply.send({
       service: "eventpulse-ingestion-api",
       endpoints: {
         ingest_events: { method: "POST", path: "/api/v1/events" },
         metrics: { method: "GET", path: "/api/v1/metrics" },
+        events_stream: {
+          protocol: "WebSocket",
+          path: "/ws/events",
+        },
       },
     });
   });

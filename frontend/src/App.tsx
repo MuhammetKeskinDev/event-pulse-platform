@@ -1,4 +1,4 @@
-import { Activity, RefreshCw } from 'lucide-react'
+import { Activity, Loader2, Radio } from 'lucide-react'
 
 import { ErrorRateGauge } from './components/ErrorRateGauge'
 import { EventSummaryTable } from './components/EventSummaryTable'
@@ -6,8 +6,22 @@ import { ThroughputChart } from './components/ThroughputChart'
 import { useMetrics } from './hooks/useMetrics'
 
 function App() {
-  const { metrics, throughputSeries, error, loading, pollIntervalSeconds } =
-    useMetrics()
+  const { metrics, throughputSeries, error, loading, wsState } = useMetrics()
+
+  const wsTone =
+    wsState === 'open'
+      ? 'text-emerald-400'
+      : wsState === 'reconnecting' || wsState === 'connecting'
+        ? 'text-amber-400'
+        : 'text-slate-500'
+  const wsLabel =
+    wsState === 'open'
+      ? 'Live'
+      : wsState === 'connecting'
+        ? 'Connecting…'
+        : wsState === 'reconnecting'
+          ? 'Reconnecting…'
+          : 'Offline'
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
@@ -22,24 +36,27 @@ function App() {
                 EventPulse
               </h1>
               <p className="text-sm text-slate-500">
-                Live metrics · FR-05 dashboard
+                FR-05 / FR-06 · metrics over WebSocket
               </p>
             </div>
           </div>
           <div className="flex items-center gap-3 text-sm text-slate-500">
-            <RefreshCw
-              className={`h-4 w-4 ${loading ? 'animate-spin text-sky-400' : ''}`}
-              aria-hidden
-            />
+            <Radio className={`h-4 w-4 ${wsTone}`} aria-hidden />
+            <span className={wsTone}>{wsLabel}</span>
+            <span className="text-slate-600">·</span>
+            {loading ? (
+              <Loader2
+                className="h-4 w-4 animate-spin text-sky-400"
+                aria-hidden
+              />
+            ) : null}
             <span>
-              Auto-refresh every{' '}
-              <span className="font-mono text-slate-300">
-                {pollIntervalSeconds}s
-              </span>
+              Updates on each processed event (WS{' '}
+              <span className="font-mono text-slate-400">/ws/events</span>)
               {metrics?.refreshed_at ? (
                 <>
                   {' '}
-                  · Last:{' '}
+                  · Metrics at{' '}
                   <span className="font-mono text-slate-400">
                     {new Date(metrics.refreshed_at).toLocaleTimeString()}
                   </span>
@@ -64,7 +81,7 @@ function App() {
               Throughput
             </h2>
             <p className="mb-4 text-left text-xs text-slate-600">
-              Total events in the rolling 1-hour window (one sample per poll).
+              Total events in the rolling 1-hour window (one sample per metrics refresh).
             </p>
             <ThroughputChart data={throughputSeries} />
           </section>

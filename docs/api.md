@@ -27,7 +27,26 @@
 |------|--------|----------|
 | 503 | `metrics_unavailable` | Veritabanı sorgusu başarısız |
 
-**Dashboard (FR-05):** `frontend/` Vite uygulaması geliştirmede `npm run dev` ile çalışır; `/api` istekleri Vite proxy üzerinden backend’e gider. Üretim önizlemesi veya ayrı origin için `VITE_API_BASE` (ör. `http://127.0.0.1:3000`) tanımlanabilir.
+**Dashboard (FR-05 / FR-06):** `frontend/` Vite uygulaması geliştirmede `npm run dev` ile çalışır; `/api` ve **`/ws` WebSocket** Vite proxy ile backend’e gider. Üretim için `VITE_API_BASE` ve isteğe bağlı **`VITE_WS_BASE`** (HTTP(S) kökü; istemci `ws`/`wss`’e çevirir).
+
+## Realtime (WebSocket — FR-06)
+
+| Protokol | Yol | Açıklama |
+|----------|-----|----------|
+| WebSocket | `/ws/events` | Worker her başarılı persist + `XACK` sonrası Redis kanalı `eventpulse:events_live` üzerine yayın yapar; API abone olur ve bağlı tüm WS istemcilerine mesajı iletir. |
+
+**Mesaj örneği (JSON string):**
+
+```json
+{
+  "type": "event_processed",
+  "event_id": "…",
+  "event_type": "page_view",
+  "occurred_at": "2026-03-23T12:00:00.000Z"
+}
+```
+
+Dashboard bu mesajı alınca `GET /api/v1/metrics` ile grafikleri yeniler.
 
 ## Ingestion
 

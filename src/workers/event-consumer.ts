@@ -4,6 +4,8 @@ import Redis from "ioredis";
 import pg from "pg";
 import pino from "pino";
 
+import { EVENTS_LIVE_CHANNEL } from "../constants/realtime";
+
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
   name: "event-consumer",
@@ -213,6 +215,19 @@ async function run(): Promise<void> {
             { messageId, event_id: envelope.event_id, event_type: envelope.event_type },
             "event_persisted",
           );
+          try {
+            await redis.publish(
+              EVENTS_LIVE_CHANNEL,
+              JSON.stringify({
+                type: "event_processed",
+                event_id: envelope.event_id,
+                event_type: envelope.event_type,
+                occurred_at: envelope.occurred_at,
+              }),
+            );
+          } catch (pubErr) {
+            log.warn({ pubErr, event_id: envelope.event_id }, "ws_live_publish_failed");
+          }
         } catch (err) {
           log.error(
             { err, messageId, event_id: envelope.event_id },
