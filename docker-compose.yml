@@ -1,0 +1,40 @@
+# Yerel geliştirme: TimescaleDB + Redis
+# Üretimde şifreleri ve imaj etiketlerini ortam değişkenleri / secret'larla yönetin.
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: eventpulse-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eventpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eventpulse_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-eventpulse}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eventpulse} -d ${POSTGRES_DB:-eventpulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: eventpulse-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  timescaledb_data:
+  redis_data:
