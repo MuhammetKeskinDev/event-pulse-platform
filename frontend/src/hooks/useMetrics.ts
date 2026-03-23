@@ -72,7 +72,7 @@ export function useMetrics() {
     })
 
     try {
-      const aRes = await fetch(anomaliesUrl(12))
+      const aRes = await fetch(anomaliesUrl(10))
       if (aRes.ok) {
         const body = (await aRes.json()) as { items: AnomalyRow[] }
         setAnomalies(body.items ?? [])

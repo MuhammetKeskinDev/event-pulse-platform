@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 12 |
+| **Total AI interactions logged** | 13 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~335 minutes |
+| **Estimated time saved** | ~365 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -229,6 +229,24 @@
 **Validation:** `npm install`; API + worker açıkken `npm run load-gen`; TimescaleDB açıkken `npm run seed-db` (migrasyonlar uygulanmış olmalı).
 
 **Quality:** 5/5 — Şema ile hizalı üretim, tekrarlanabilir seed.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-013 | 2026-03-23 22:00 PM | Cursor
+
+**Category:** Anomaly list UI (FR-09 P1)
+
+**Context:** Z-score ile üretilen `anomalies` kayıtlarının dashboard’da tablo olarak görünmesi; `GET /api/v1/anomalies` zaten vardı, panel sözleşmesi ve dokümantasyon netleştirildi.
+
+**Prompt:** Recent Anomalies paneli: timestamp, severity (renk), event type, description; WS/poll ile yenileme; API + `docs/api.md`; AI-013.
+
+**AI Output Summary:** `RecentAnomalies.tsx` — tablo (Timestamp, Severity, Event type, Description), severity rozet renkleri (`critical` / `high` / `medium` / `low`), `*` → Aggregate, JSON `description` için Türkçe özet satırı + `title` ile tam metin; `useMetrics` anomali `limit=10`; `docs/api.md` yanıt örneği ve sıralama notu. Backend ve `GET /` değişmedi (endpoint mevcuttu).
+
+**Your Modifications:** —
+
+**Validation:** `npm run build` (frontend).
+
+**Quality:** 5/5 — Mevcut WS tabanlı `fetchOnce` ile anomali listesi her yenilemede güncellenir.
 
 **Time Impact:** Saved ~30 minutes.
 

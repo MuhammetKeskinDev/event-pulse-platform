@@ -52,9 +52,25 @@ Dashboard bu mesajı alınca `GET /api/v1/metrics` ve `GET /api/v1/anomalies` il
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `GET` | `/api/v1/anomalies?limit=10` | Son kayıtlar (**200**). `limit` 1–100, varsayılan 10. |
+| `GET` | `/api/v1/anomalies?limit=10` | Son kayıtlar (**200**). `limit` 1–100, varsayılan 10. `ORDER BY detected_at DESC`. |
 
-**Satır alanları:** `id`, `event_type` (toplam hacim kuralı için `*`), `severity` (ör. `critical`), `detected_at`, `description` (JSON metin).
+**Satır alanları:** `id`, `event_type` (toplam hacim kuralı için `*`), `severity` (`critical`, `high`, `medium`, `low` vb.), `detected_at` (ISO-8601), `description` (çoğunlukla JSON; Z-score kuralı alanları).
+
+### Yanıt örneği (200)
+
+```json
+{
+  "items": [
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "event_type": "*",
+      "severity": "critical",
+      "detected_at": "2026-03-23T12:05:00.000Z",
+      "description": "{\"rule\":\"zscore_3sigma_minute_volume\",\"eval_count\":420,...}"
+    }
+  ]
+}
+```
 
 **Şema:** `02_anomalies.sql` + `03_anomalies_p1_columns.sql` (`event_type` sütunu).
 

@@ -6,20 +6,53 @@ interface Props {
   items: AnomalyRow[]
 }
 
-function shortSummary(description: string): string {
+function formatDescriptionCell(description: string): string {
   try {
     const o = JSON.parse(description) as Record<string, unknown>
+    const rule = o.rule
     const count = o.eval_count
     const z = o.z_score_sigma ?? o.sigma_distance
-    if (typeof count === 'number' && z !== undefined) {
-      return `Volume spike: ${count} events · Z≈${String(z)}`
+    if (rule === 'zscore_3sigma_minute_volume' && typeof count === 'number') {
+      const zPart =
+        z === 'inf' || z === Infinity
+          ? 'σ = ∞'
+          : typeof z === 'number'
+            ? `Z ≈ ${z}σ`
+            : z !== undefined
+              ? `Z ≈ ${String(z)}`
+              : ''
+      return `Dakika hacmi ${count} olay · baseline'a göre 3σ kuralı${zPart ? ` · ${zPart}` : ''}`
     }
   } catch {
     /* plain text */
   }
-  return description.length > 120
-    ? `${description.slice(0, 117)}…`
+  return description.length > 200
+    ? `${description.slice(0, 197)}…`
     : description
+}
+
+function severityBadgeClass(severity: string): string {
+  const s = severity.toLowerCase()
+  if (s === 'critical') {
+    return 'border-rose-800/80 bg-rose-950/90 text-rose-200'
+  }
+  if (s === 'high') {
+    return 'border-orange-800/80 bg-orange-950/90 text-orange-200'
+  }
+  if (s === 'medium') {
+    return 'border-amber-800/80 bg-amber-950/90 text-amber-100'
+  }
+  if (s === 'low') {
+    return 'border-sky-800/80 bg-sky-950/80 text-sky-200'
+  }
+  return 'border-slate-700 bg-slate-800/90 text-slate-300'
+}
+
+function eventTypeLabel(eventType: string): string {
+  if (eventType === '*') {
+    return 'Aggregate (*)'
+  }
+  return eventType
 }
 
 export function RecentAnomalies({ items }: Props) {
@@ -27,7 +60,7 @@ export function RecentAnomalies({ items }: Props) {
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20">
       <div className="mb-4 flex items-center gap-2">
         <AlertOctagon className="h-4 w-4 text-rose-400" aria-hidden />
-        <h2 className="text-left text-sm font-medium text-slate-400">
+        <h2 className="text-left text-sm font-medium text-slate-200">
           Recent anomalies
         </h2>
         <span className="text-xs text-slate-600">(FR-09 P1)</span>
@@ -35,33 +68,56 @@ export function RecentAnomalies({ items }: Props) {
       {items.length === 0 ? (
         <p className="text-sm text-slate-500">No anomalies recorded yet.</p>
       ) : (
-        <ul className="max-h-56 space-y-3 overflow-y-auto pr-1 text-left">
-          {items.map((row) => (
-            <li
-              key={row.id}
-              className="rounded-lg border border-slate-800/80 bg-slate-950/50 px-3 py-2"
-            >
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded bg-rose-950/80 px-1.5 py-0.5 font-medium uppercase tracking-wide text-rose-300">
-                  {row.severity}
-                </span>
-                <span className="font-mono text-slate-500">
-                  {row.event_type === '*' ? 'all types' : row.event_type}
-                </span>
-                <span className="text-slate-600">·</span>
-                <time
-                  className="text-slate-500"
-                  dateTime={row.detected_at}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[36rem] border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-800 text-xs font-medium uppercase tracking-wide text-slate-500">
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Timestamp
+                </th>
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Severity
+                </th>
+                <th scope="col" className="py-2 pr-4 font-medium">
+                  Event type
+                </th>
+                <th scope="col" className="py-2 font-medium">
+                  Description
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((row) => (
+                <tr
+                  key={row.id}
+                  className="border-b border-slate-800/80 last:border-0"
                 >
-                  {new Date(row.detected_at).toLocaleString()}
-                </time>
-              </div>
-              <p className="mt-1 text-sm text-slate-300">
-                {shortSummary(row.description)}
-              </p>
-            </li>
-          ))}
-        </ul>
+                  <td className="whitespace-nowrap py-3 pr-4 align-top text-slate-300">
+                    <time dateTime={row.detected_at}>
+                      {new Date(row.detected_at).toLocaleString()}
+                    </time>
+                  </td>
+                  <td className="py-3 pr-4 align-top">
+                    <span
+                      className={`inline-block rounded-md border px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${severityBadgeClass(row.severity)}`}
+                    >
+                      {row.severity}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 align-top font-mono text-xs text-slate-400">
+                    {eventTypeLabel(row.event_type)}
+                  </td>
+                  <td
+                    className="max-w-md py-3 align-top text-slate-300"
+                    title={row.description}
+                  >
+                    {formatDescriptionCell(row.description)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
