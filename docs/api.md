@@ -27,6 +27,8 @@
 |------|--------|----------|
 | 503 | `metrics_unavailable` | Veritabanı sorgusu başarısız |
 
+**Dashboard (FR-05):** `frontend/` Vite uygulaması geliştirmede `npm run dev` ile çalışır; `/api` istekleri Vite proxy üzerinden backend’e gider. Üretim önizlemesi veya ayrı origin için `VITE_API_BASE` (ör. `http://127.0.0.1:3000`) tanımlanabilir.
+
 ## Ingestion
 
 | Yöntem | Yol | Açıklama |
