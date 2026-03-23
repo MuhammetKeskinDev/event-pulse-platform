@@ -6,6 +6,27 @@
 |--------|-----|----------|
 | `GET` | `/` | Servis özeti ve ingestion uç noktası bilgisi (**200**). |
 
+## Metrics (dashboard)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|----------|
+| `GET` | `/api/v1/metrics` | TimescaleDB `events` tablosundan metrikler (**200**). Önbellek: `Cache-Control: public, max-age=10` (panelde ~10 sn’de bir yenileme için uygundur). |
+
+### Yanıt özeti
+
+- **`window`:** Son 1 saatlik sorgu aralığı (`start` / `end`, ISO-8601).
+- **`last_hour.by_event_type`:** Son 1 saatte `event_type` başına olay sayıları.
+- **`last_hour.error_rate_percent`:** Son 1 saatte `event_type = 'error'` oranı (%).
+- **`all_time`:** Tablodaki tüm kayıtlar için toplam olay, hata sayısı ve **`error_rate_percent`** (sistem geneli hata oranı).
+- **`suggested_poll_interval_seconds`:** `10` (önerilen poll aralığı).
+- **`refreshed_at`:** Yanıtın üretildiği an.
+
+### Hatalar
+
+| HTTP | Gövde | Açıklama |
+|------|--------|----------|
+| 503 | `metrics_unavailable` | Veritabanı sorgusu başarısız |
+
 ## Ingestion
 
 | Yöntem | Yol | Açıklama |

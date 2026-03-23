@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 5 |
+| **Total AI interactions logged** | 6 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~130 minutes |
+| **Estimated time saved** | ~155 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -105,6 +105,24 @@
 **Quality:** 5/5 — Hypertable + consumer group ile mimari hizalı P0 worker.
 
 **Time Impact:** Saved ~30 minutes.
+
+### AI-006 | 2026-03-23 16:00 PM | Cursor
+
+**Category:** Metrics API
+
+**Context:** Dashboard paneli için TimescaleDB tabanlı metrikler; son 1 saat `event_type` dağılımı, sistem geneli hata oranı (%); istemcinin ~10 sn aralıkla poll etmesi için `Cache-Control` ve `suggested_poll_interval_seconds`.
+
+**Prompt:** `GET /api/v1/metrics` — son 1 saatte türlere göre count, toplam hata oranı yüzde, 10 sn yenilemeye uygun yanıt; AI-006 günlük kaydı.
+
+**AI Output Summary:** `app.ts` içinde paralel SQL (`last 1 hour` GROUP BY, tüm zaman toplam/hata sayımı), `last_hour` + `all_time` özetleri ve `error_rate_percent`, `public, max-age=10`, `GET /` endpoint listesine metrics eklendi; `docs/api.md` Metrics bölümü.
+
+**Your Modifications:** —
+
+**Validation:** `npx tsc --noEmit` temiz.
+
+**Quality:** 5/5 — Panel için tek uç noktada pencere + sistem geneli KPI.
+
+**Time Impact:** Saved ~25 minutes.
 
 ---
 

@@ -25,6 +25,29 @@ const logLevel = (process.env.LOG_LEVEL ?? "info") as
   | "trace"
   | "silent";
 
+const METRICS_CACHE_MAX_AGE_SEC = 10;
+
+function toBigIntString(value: unknown): bigint {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return BigInt(Math.trunc(value));
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return BigInt(value);
+  }
+  return 0n;
+}
+
+function errorRatePercent(errors: bigint, total: bigint): number {
+  if (total === 0n) {
+    return 0;
+  }
+  const pct = (Number(errors) / Number(total)) * 100;
+  return Math.round(pct * 100) / 100;
+}
+
 async function buildServer() {
   const app = Fastify({
     logger: {
@@ -57,8 +80,92 @@ async function buildServer() {
       service: "eventpulse-ingestion-api",
       endpoints: {
         ingest_events: { method: "POST", path: "/api/v1/events" },
+        metrics: { method: "GET", path: "/api/v1/metrics" },
       },
     });
+  });
+
+  app.get("/api/v1/metrics", async (request, reply) => {
+    void reply.header(
+      "Cache-Control",
+      `public, max-age=${METRICS_CACHE_MAX_AGE_SEC}`,
+    );
+
+    const windowEnd = new Date();
+    const windowStart = new Date(windowEnd.getTime() - 60 * 60 * 1000);
+
+    try {
+      const [distResult, allTimeResult] = await Promise.all([
+        app.pg.query<{
+          event_type: string;
+          count: string | number | bigint;
+        }>(
+          `
+            SELECT event_type, COUNT(*)::bigint AS count
+            FROM events
+            WHERE occurred_at >= NOW() - INTERVAL '1 hour'
+            GROUP BY event_type
+            ORDER BY count DESC
+          `,
+        ),
+        app.pg.query<{
+          total: string | number | bigint;
+          errors: string | number | bigint;
+        }>(
+          `
+            SELECT
+              COUNT(*)::bigint AS total,
+              COUNT(*) FILTER (WHERE event_type = 'error')::bigint AS errors
+            FROM events
+          `,
+        ),
+      ]);
+
+      const byEventType = distResult.rows.map((row) => ({
+        event_type: row.event_type,
+        count: Number(toBigIntString(row.count)),
+      }));
+
+      let lastHourTotal = 0n;
+      let lastHourErrors = 0n;
+      for (const row of distResult.rows) {
+        const c = toBigIntString(row.count);
+        lastHourTotal += c;
+        if (row.event_type === "error") {
+          lastHourErrors += c;
+        }
+      }
+
+      const allRow = allTimeResult.rows[0];
+      const allTotal = allRow ? toBigIntString(allRow.total) : 0n;
+      const allErrors = allRow ? toBigIntString(allRow.errors) : 0n;
+
+      request.log.debug({ lastHourTotal: String(lastHourTotal) }, "metrics_served");
+
+      return reply.send({
+        refreshed_at: windowEnd.toISOString(),
+        suggested_poll_interval_seconds: METRICS_CACHE_MAX_AGE_SEC,
+        window: {
+          label: "last_1_hour",
+          start: windowStart.toISOString(),
+          end: windowEnd.toISOString(),
+        },
+        last_hour: {
+          by_event_type: byEventType,
+          total_events: Number(lastHourTotal),
+          error_events: Number(lastHourErrors),
+          error_rate_percent: errorRatePercent(lastHourErrors, lastHourTotal),
+        },
+        all_time: {
+          total_events: Number(allTotal),
+          error_events: Number(allErrors),
+          error_rate_percent: errorRatePercent(allErrors, allTotal),
+        },
+      });
+    } catch (err) {
+      request.log.error({ err }, "metrics_query_failed");
+      return reply.status(503).send({ error: "metrics_unavailable" });
+    }
   });
 
   app.setErrorHandler((err, request, reply) => {
