@@ -1,55 +1,74 @@
-# EventPulse: Tasarımdan WebSocket’e Teknik Yolculuk
+# EventPulse: İki Milyon Olay Problemini Parçalamak — Teknik Bir Yolculuk
 
-Bu yazı, EventPulse platformunun nasıl tasarlandığını ve “senior” seviyesinde hangi teknik seçimlerin neden yapıldığını, uçtan uca bir teknik makale düzeninde anlatır. Hedef okuyucu, olay akışı, zaman serisi ve gerçek zamanlı panel kavramlarına aşina bir yazılım mühendisidir.
+Bu yazı, bir vaka çalışması düzeyinde “günde yaklaşık **iki milyon olay** kabul edebilen, operatörün görebildiği ve zaman serisi olarak sorgulanabilir bir platform” hedefini nasıl **yönetilebilir parçalara** böldüğümüzü anlatır. Okuyucu, HTTP ingestion, kuyruk ve zaman serisi veritabanı kavramlarına aşina bir yazılım mühendisi varsayılır.
 
-## Problem çerçevesi
+---
 
-EventPulse, yüksek hacimli olayları kabul eden, güvenilir biçimde işleyen ve operatörün durumu görebileceği bir sistem olarak kurgulandı. Kısıtlar tipik bir vaka çalışmasına benzer: kısa sürede işler bir ürün çıkmalı, ölçek ve gecikme hedefleri (örneğin kabul katmanında düşük P95) göz önünde bulundurulmalı ve ileride servis sınırları genişletilebilmelidir.
+## Problem: ölçek tek bir sayı değil
 
-Bu çerçeve, “tek bir dev süreç” yerine **gevşek bağlı** bileşenlere yönelmeyi zorunlu kılıyor: API hızlı karar vermeli, ağır iş yükü ertelenmeli, kalıcı durum tek bir yerde toplanmamalı.
+“İki milyon event” ifadesi, tek başına bir performans benchmark’ı değil; **süreklilik ve bütçe** anlamı taşır:
 
-## Mimari omurga: olay güdümlü ve katmanlı yapı
+- Günlük 2M olay ≈ ortalama **~23 olay/saniye** sürekli; pratikte trafik **patikalar** ve kabul katmanı bunu katlar.
+- Vaka metni ayrıca **kabul (ingestion) tarafında P95 gecikmenin 200 ms altında** kalması beklentisini taşır. Bu, “sistem ayakta”dan farklıdır: kullanıcı veya entegrasyon partneri, çoğu istekte **hızlı bir 202 Accepted** görmelidir.
 
-İlk karar, giriş katmanının sorumluluğunu daraltmaktı: doğrulama, sıraya alma ve hızlı yanıt. İş mantığının tamamı API sürecinde çözülmemeli; aksi halde hem ölçek hem de hata izolasyonu zorlaşır. Bu nedenle **API → (kuyruk) → worker → veritabanı** ayrımı temel alındı.
+Bu yüzden problemi üç soruya ayırdık:
 
-Bu ayrımın somut karşılığı: HTTP tarafında **202 Accepted** ile erken yanıt ve asenkron işleme beklentisi. Böylece istemci beklerken veritabanı kilidi veya ağır agregasyonlarla sınırlanmıyoruz.
+1. **Kabul:** Olayı doğrula, güvenilir şekilde sıraya al, **hemen** yanıt ver.
+2. **İşleme:** Ağır veya başarısızlığa açık işleri API’den çıkar; **at-least-once** işlemeye yakın bir tüketim modeli kur.
+3. **Gerçek ve gözlem:** Kalıcı gerçeği tek yerde topla (zaman serisi), operatöre özet metrikler ve gerekirse **canlı** sinyal ver.
+
+Bu ayrım, “tek monolit süreçte her şeyi yap” tuzağından kaçınmayı mümkün kılar.
+
+---
 
 ## Neden Redis Streams?
 
-Kuyruk için Redis Streams seçilmesinin birkaç gerekçesi var. Birincisi, zaten **düşük gecikmeli** bir altyapı (Redis) içinde kalınarak operasyonel karmaşıklığın sınırlanması. İkincisi, Streams’in **tüketici grupları** ve mesaj kimlikleri ile “en az bir kez” işlemeye yakın pratik bir model sunması: API yayımlar, worker grubu okur, başarılı işlemden sonra onay (ack) verilir.
+Kafka veya ayrı bir mesaj broker’ı bu ölçekte mantıklı olabilir; vaka süresi ve operasyonel yük için **Redis Streams** üç nedeni bir arada sağladı:
 
-Üçüncüsü, vaka ölçeğinde Kafka kadar ağır bir dağıtık kuyruk kurmadan **decoupling** elde edilmesi. Streams, EventPulse gibi prototipten üretime geçişte makul bir orta yol sunar; ileride gerekirse daha büyük bir mesajlaşma sistemine evrilirken de desen benzer kalır.
+1. **Düşük devreye alma maliyeti:** Zaten Redis kullanıyoruz; Streams aynı operatör beyninde kalır, ek küme yönetimi yoktur.
+2. **Tüketici grupları:** `XREADGROUP` ile paralel worker ölçeklemesi ve mesaj kimlikleriyle **yeniden okunabilir**, **onaylanabilir (ack)** bir tüketim hattı.
+3. **Decoupling:** API yalnızca `XADD` ile stream’e yazar; worker ayrı süreçte okur. API, veritabanı yazma süresine **kilitlenmez** — bu, P95 bütçesinin korunmasına doğrudan yardım eder.
 
-Özetle: Redis Streams, “hemen çalışan, anlaşılır ve genişletilebilir” bir mesaj sınırı sağlar.
+Özet: Redis Streams, “hemen çalışan, anlaşılır, ileride daha büyük bir kuyruğa evrilebilir” bir **sınır katmanı**dır.
 
-## Neden TimescaleDB (PostgreSQL üzerinde)?
+---
 
-Olay verisi doğası gereği **zaman serisi**dir: `occurred_at` ekseninde yoğun yazma ve aralık sorguları beklenir. Saf ilişkisel tabloda bu yük, indeks ve tablo şişmesiyle yönetilir; TimescaleDB ise **hypertable** ve bölümleme ile bu iş yükünü ürünleştirir.
+## Neden TimescaleDB?
 
-Aynı zamanda PostgreSQL uyumluluğu, SQL ekosistemi, yedekleme ve şema evrimi gibi konularda “bilinen” bir zemini korur. EventPulse’ta `events` tablosu hypertable’a dönüştürülürken, TimescaleDB’nin **partition anahtarını benzersiz kısıtlarla uyumlu** tutma zorunluluğu (örneğin birincil anahtarda `occurred_at` bulunması) gerçek bir mühendislik geri bildirimi olarak ortaya çıktı; bu kısıt, veri modelinin tasarımını şekillendirdi.
+Olaylar doğası gereği **zaman serisi**: `occurred_at` ekseninde yoğun insert ve “son bir saat / son bir gün” pencereleriyle sorgular beklenir. Klasik ilişkisel tabloda bu, indeks ve tablo büyümesiyle birlikte operasyonel acı verir.
 
-## Ingestion API ve doğrulama
+**TimescaleDB**, PostgreSQL uyumluluğunu koruyarak hypertable ve bölümleme ile bu iş yükünü ürünleştirir. SQL ekosistemi, yedekleme ve şema evrimi “bilinen dünya”da kalır.
 
-Fastify + TypeScript + Zod kombinasyonu, düşük framework overhead’i ile **katı sözleşme** tanımını birleştirir. Olay türleri discriminated union ile ayrılır; böylece “geçerli JSON ama anlamsız alanlar” sınıfı erken elenir. Pino ile yapılandırılmış loglama, üretimde izlenebilirlik için zorunlu görülür.
+**Gerçek dünya müdahalesi:** Hypertable oluştururken TimescaleDB, partition sütunu (`occurred_at`) ile **birincil anahtar / benzersiz kısıt uyumu** ister. İlk taslakta yalnızca `id` ile PK önerilmişti; migrasyon gerçek veritabanında çalıştırılınca hata verdi ve model **bileşik PK `(id, occurred_at)`** ile düzeltildi. Bu, “Postgres = Timescale” varsayımının nerede kırıldığının somut örneğidir.
 
-## Worker ve dayanıklılık
+---
 
-Worker, stream’den okur, kural motoru (örneğin kritik hata uyarısı) çalıştırır ve TimescaleDB’ye yazar. Başarısız kalıcı yazmalarda mesajın **ack edilmemesi**, tekrar deneme için pending durumda kalmasını sağlar; zehirli veya bozuk mesajlarda ise sonsuz döngüyü önlemek için ayrı bir strateji (örneğin ack + log) gerekir. Bu ayrım, “asla kaybetme” ile “sistemi kilitleme” arasındaki gerçekçi dengeyi yansıtır.
+## Uçtan uca akış
 
-## Metrikler ve panel
+1. İstemci `POST /api/v1/events` ile **Zod** ile doğrulanmış bir olay gönderir.
+2. API **202 Accepted** döner ve zarfı Redis stream’e (`XADD`) yazar.
+3. Worker stream’den **tüketici grubu** ile okur, TimescaleDB’ye yazar, başarıda **ack** eder.
+4. Metrik ve anomali mantığı veritabanı üzerinden çalışır; canlı his için worker **pub/sub** ile yayınlar, API süreci WebSocket istemcilerine iletir.
 
-Toplanan olaylar üzerinden son bir saatlik dağılım ve hata oranı gibi özetler, operatör için tek endpoint altında sunulur. İlk aşamada panel, periyodik yenileme ile beslenebilir; ancak gerçek zamanlı his için **WebSocket** katmanı eklenir.
+Bu zincirde “P95 &lt; 200 ms” beklentisi özellikle **adım 1–2** için tanımlanır: doğrulama + enqueue + HTTP yanıtı. Veritabanı insert süresi, istemcinin beklediği kritik yolun dışına alınır.
 
-## WebSocket entegrasyonu: çok süreçli gerçeklik
+---
 
-API süreci ile worker süreci ayrı olduğundan, “worker her işlemde doğrudan WS istemcisine yazamaz”. Pratik çözüm: worker **Redis pub/sub** ile yayın yapar, API süreci abone olur ve bağlı WebSocket istemcilerine iletir. Böylece gerçek zamanlı güncelleme, süreçler arası gevşek bağlantıyı bozmaz.
+## Yük testi ve başarı ölçütü: `load-gen` + P95
 
-Frontend tarafında Vite proxy ile geliştirme ortamında `/ws` yolu backend’e yönlendirilir; üretimde ise açık `VITE_WS_BASE` gibi yapılandırmalarla aynı desen korunur.
+Projede **`npm run load-gen`** (`scripts/load-gen.ts`), Appendix A ile uyumlu rastgele `page_view`, `purchase`, `error`, `system_health` olaylarını hedef URL’ye gönderir. Varsayılanlar kabaca **100 istek/saniye** hedefi ve binlerce toplam istek üzerinden **sürdürülebilir basınç** üretmek içindir; çalışma sonunda özet istatistik (başarılı/başarısız sayıları, süre, **ortalama** yanıt süresi, gerçekleşen evt/s) yazdırılır.
 
-## Anomali tespiti (FR-09)
+**Başarı kriteri (vaka / mimari hedef):** Kabul katmanında **P95 gecikme &lt; 200 ms** — yük altında bile çoğu istemci hızlı bir kabul görmelidir.
 
-Dakika bazlı toplam hacim için son on beş dakikanın örneklem ortalaması ve standart sapması hesaplanır; son tamamlanmış dakikanın hacmi **üç sigma** eşiğini aştığında kayıt oluşturulur. Bu, basit ama açıklanabilir bir istatistiksel kuraldır; işletmede daha gelişmiş modellerle değiştirilmeye açıktır.
+- `load-gen` çıktısındaki **ortalama ms**, regresyon ve kabaca sağlık için kullanışlıdır; tek başına P95 yerine geçmez.
+- **P95’i resmileştirmek** için üretim öncesi ortamda `autocannon`, `k6` veya eşdeğer bir araçla histogram üretmek ve hedefi oradan doğrulamak en doğru yaklaşımdır.
 
-## Son söz
+Pratik kullanım: API ve altyapı ayağa kalktıktan sonra `TOTAL` ve `RATE` ortam değişkenleriyle senaryoyu büyütün; P95’i ayrıca ölçtüğünüzde, **200 ms çizgisinin altında kalma** hedefiyle kıyaslayın.
 
-EventPulse’un yolculuğu, “hızlı API”den öte, **zaman serisi**, **kuyruk**, **asıl kaynak (veritabanı)** ve **gerçek zamanlı gözlem** katmanlarının bilinçli sıralanmasıdır. Redis Streams ve TimescaleDB seçimleri tek başına sihir değildir; birlikte, senior düzeyde bir olay platformunun iskeletini makul karmaşıklıkta sunar.
+---
+
+## Özet
+
+EventPulse yolculuğu, “hızlı bir REST API”den fazlasıdır: **zaman serisi**, **stream tabanlı gevşek bağlantı**, **asıl kaynak (TimescaleDB)** ve **gerçek zamanlı gözlem** katmanlarının bilinçli sıralanmasıdır. Redis Streams ve TimescaleDB seçimleri sihir değildir; birlikte, iki milyonluk ölçeği **parçalayarak** yönetilebilir bir mimari sunar — ve kabul tarafında **P95 &lt; 200 ms** beklentisi, bu tasarımın ölçülebilir sınavıdır.
+
+**İlgili belgeler:** [`docs/architecture.md`](architecture.md), [`docs/api.md`](api.md), [`docs/ai-strategy.md`](ai-strategy.md).
