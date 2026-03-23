@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 10 |
+| **Total AI interactions logged** | 11 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~275 minutes |
+| **Estimated time saved** | ~305 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -193,6 +193,24 @@
 **Validation:** `npx tsc --noEmit`, `npm run build`, migrasyon `03` uygulandı.
 
 **Quality:** 5/5 — Operasyonel job + API + UI kapalı döngü.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-011 | 2026-03-23 20:30 PM | Cursor
+
+**Category:** Testing implementation (Vitest birim + Redis entegrasyonu)
+
+**Context:** `anomaly-detector` Z-score / 3σ mantığının test edilmesi; `POST /api/v1/events` akışının Redis `events_stream`’e yazımının doğrulanması; kök `tests/` ve `vitest.config.ts`.
+
+**Prompt:** Proje gereksinimlerine uygun `/tests`: unit (Z-score normal/anomali), integration (event → Redis), AI-011 kaydı.
+
+**AI Output Summary:** `sampleStdDev`, `zScoreDistance`, `computeVolumeZScoreDecision` export; `detectAndPersistAnomaly` aynı karar fonksiyonunu kullanır; `buildServer` export + `silent`; kök `package.json` (vitest, cross-env), `tests/unit/anomaly-zscore.test.ts`, `tests/integration/ingestion-redis.test.ts` (`RUN_INTEGRATION=1` ile çalışır), `docs/ai-log.md` AI-011.
+
+**Your Modifications:** —
+
+**Validation:** `npm test` (birim); `RUN_INTEGRATION=1 npm run test:integration` (Postgres + Redis açıkken).
+
+**Quality:** 5/5 — Saf matematik birimleri + gerçek stream doğrulaması.
 
 **Time Impact:** Saved ~30 minutes.
 
