@@ -120,6 +120,7 @@ async function buildServer() {
       endpoints: {
         ingest_events: { method: "POST", path: "/api/v1/events" },
         metrics: { method: "GET", path: "/api/v1/metrics" },
+        anomalies: { method: "GET", path: "/api/v1/anomalies" },
         events_stream: {
           protocol: "WebSocket",
           path: "/ws/events",
@@ -208,6 +209,48 @@ async function buildServer() {
     } catch (err) {
       request.log.error({ err }, "metrics_query_failed");
       return reply.status(503).send({ error: "metrics_unavailable" });
+    }
+  });
+
+  app.get("/api/v1/anomalies", async (request, reply) => {
+    const raw = (request.query as { limit?: string }).limit;
+    const parsed = raw !== undefined ? Number.parseInt(raw, 10) : 10;
+    const limit = Number.isFinite(parsed)
+      ? Math.min(100, Math.max(1, parsed))
+      : 10;
+
+    try {
+      const result = await app.pg.query<{
+        id: string;
+        event_type: string;
+        severity: string;
+        detected_at: Date;
+        description: string;
+      }>(
+        `
+          SELECT id, event_type, severity, detected_at, description
+          FROM anomalies
+          ORDER BY detected_at DESC
+          LIMIT $1
+        `,
+        [limit],
+      );
+
+      return reply.send({
+        items: result.rows.map((row) => ({
+          id: row.id,
+          event_type: row.event_type,
+          severity: row.severity,
+          detected_at:
+            row.detected_at instanceof Date
+              ? row.detected_at.toISOString()
+              : String(row.detected_at),
+          description: row.description,
+        })),
+      });
+    } catch (err) {
+      request.log.error({ err }, "anomalies_query_failed");
+      return reply.status(503).send({ error: "anomalies_unavailable" });
     }
   });
 

@@ -46,7 +46,19 @@
 }
 ```
 
-Dashboard bu mesajı alınca `GET /api/v1/metrics` ile grafikleri yeniler.
+Dashboard bu mesajı alınca `GET /api/v1/metrics` ve `GET /api/v1/anomalies` ile paneli yeniler.
+
+## Anomalies (FR-09 P1)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|----------|
+| `GET` | `/api/v1/anomalies?limit=10` | Son kayıtlar (**200**). `limit` 1–100, varsayılan 10. |
+
+**Satır alanları:** `id`, `event_type` (toplam hacim kuralı için `*`), `severity` (ör. `critical`), `detected_at`, `description` (JSON metin).
+
+**Şema:** `02_anomalies.sql` + `03_anomalies_p1_columns.sql` (`event_type` sütunu).
+
+Worker, `detectAndPersistAnomaly` çağrısından sonra kritik kayıt oluşursa `anomaly_recorded` WS mesajı yayınlar.
 
 ## Ingestion
 

@@ -3,6 +3,9 @@ import type { Pool } from "pg";
 const BASELINE_MINUTES = 15;
 const SIGMA_THRESHOLD = 3;
 
+/** Tüm event türleri birlikte; dakika başına toplam hacim Z-skoru. */
+export const ANOMALY_EVENT_TYPE_AGGREGATE = "*";
+
 export interface AnomalyDetectionResult {
   readonly anomaly: boolean;
   readonly evalMinuteStart: string;
@@ -24,7 +27,8 @@ function sampleStdDev(values: readonly number[]): number {
   return Math.sqrt(variance);
 }
 
-function isAnomaly(
+/** Örneklem standart sapmasına göre Z-skoru (sapma / σ). */
+function zScoreDistance(
   evalCount: number,
   mean: number,
   stdDev: number,
@@ -32,7 +36,8 @@ function isAnomaly(
   if (stdDev === 0) {
     return {
       anomaly: evalCount !== mean,
-      sigmaDistance: mean === 0 && evalCount === 0 ? 0 : Number.POSITIVE_INFINITY,
+      sigmaDistance:
+        mean === 0 && evalCount === 0 ? 0 : Number.POSITIVE_INFINITY,
     };
   }
   const sigmaDistance = Math.abs(evalCount - mean) / stdDev;
@@ -43,9 +48,9 @@ function isAnomaly(
 }
 
 /**
- * FR-09: Son 15 dakikanın dakika bazlı sayımları üzerinden ortalama ve örneklem
- * standart sapması; son tamamlanmış 1 dakikanın hacmi 3σ dışındaysa anomali kaydı.
- * Periyodik olarak (cron / worker) çağrılmak üzere tasarlandı.
+ * P1 FR-09: Son 15 dakikanın dakika bazlı toplam event sayıları üzerinden ortalama ve
+ * örneklem standart sapması (Z-score temeli). Son tamamlanmış 1 dakikanın hacmi
+ * ortalamadan 3σ fazla sapıyorsa **critical** anomali olarak kaydedilir.
  */
 export async function detectAndPersistAnomaly(
   pool: Pool,
@@ -109,28 +114,28 @@ export async function detectAndPersistAnomaly(
     );
     const evalCount = Number(evalCountRes.rows[0]?.c ?? 0);
 
-    const { anomaly, sigmaDistance } = isAnomaly(evalCount, mean, stdDev);
+    const { anomaly, sigmaDistance } = zScoreDistance(evalCount, mean, stdDev);
 
     let persisted = false;
     if (anomaly) {
       const description = JSON.stringify({
-        rule: "3sigma_minute_volume",
+        rule: "zscore_3sigma_minute_volume",
         eval_minute_start: evalStart.toISOString(),
         eval_count: evalCount,
         baseline_minutes: BASELINE_MINUTES,
         baseline_mean: round4(mean),
         baseline_stddev_sample: round4(stdDev),
-        sigma_distance: Number.isFinite(sigmaDistance)
+        z_score_sigma: Number.isFinite(sigmaDistance)
           ? round4(sigmaDistance)
           : "inf",
       });
 
       await client.query(
         `
-          INSERT INTO anomalies (detected_at, severity, description)
-          VALUES (NOW(), $1, $2)
+          INSERT INTO anomalies (event_type, severity, detected_at, description)
+          VALUES ($1, 'critical', NOW(), $2)
         `,
-        ["high", description],
+        [ANOMALY_EVENT_TYPE_AGGREGATE, description],
       );
       persisted = true;
     }

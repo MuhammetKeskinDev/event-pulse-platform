@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 9 |
+| **Total AI interactions logged** | 10 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~245 minutes |
+| **Estimated time saved** | ~275 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -175,6 +175,24 @@
 **Validation:** `npx tsc --noEmit` (backend); `npm run build` (frontend).
 
 **Quality:** 5/5 — Ayrı worker süreci ile uyumlu pub/sub köprüsü.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-010 | 2026-03-23 19:00 PM | Cursor
+
+**Category:** Anomaly detection (FR-09 P1)
+
+**Context:** `anomalies` şeması (`event_type`), Z-score / 3σ kuralı ile **critical** kalıcılık, worker dakikalık job, `GET /api/v1/anomalies`, dashboard “Recent anomalies”, anomali sonrası WS tetikleyicisi.
+
+**Prompt:** P1 FR-09 tablo/servis/worker/dashboard/AI-010.
+
+**AI Output Summary:** `03_anomalies_p1_columns.sql`; `anomaly-detector.ts` güncellemesi (`critical`, `event_type='*'`, Z-score alan adları); `event-consumer` `setInterval(60s)` + `anomaly_recorded` publish; `app.ts` list endpoint; `RecentAnomalies` + `useMetrics` birleşik yenileme; `docs/api.md`.
+
+**Your Modifications:** —
+
+**Validation:** `npx tsc --noEmit`, `npm run build`, migrasyon `03` uygulandı.
+
+**Quality:** 5/5 — Operasyonel job + API + UI kapalı döngü.
 
 **Time Impact:** Saved ~30 minutes.
 

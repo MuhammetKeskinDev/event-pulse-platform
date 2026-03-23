@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import type { AnomalyRow } from '../types/anomaly'
 import type { MetricsResponse, ThroughputPoint } from '../types/metrics'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -14,6 +15,10 @@ export type WsConnectionState =
 
 function metricsUrl(): string {
   return `${API_BASE}/api/v1/metrics`
+}
+
+function anomaliesUrl(limit: number): string {
+  return `${API_BASE}/api/v1/anomalies?limit=${limit}`
 }
 
 function wsEventsUrl(): string {
@@ -32,6 +37,7 @@ function wsEventsUrl(): string {
 
 export function useMetrics() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
+  const [anomalies, setAnomalies] = useState<AnomalyRow[]>([])
   const [throughputSeries, setThroughputSeries] = useState<ThroughputPoint[]>(
     [],
   )
@@ -41,11 +47,11 @@ export function useMetrics() {
   const [wsState, setWsState] = useState<WsConnectionState>('connecting')
 
   const fetchOnce = useCallback(async () => {
-    const res = await fetch(metricsUrl())
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`)
+    const mRes = await fetch(metricsUrl())
+    if (!mRes.ok) {
+      throw new Error(`HTTP ${mRes.status}`)
     }
-    const data = (await res.json()) as MetricsResponse
+    const data = (await mRes.json()) as MetricsResponse
     setMetrics(data)
     const sec = data.suggested_poll_interval_seconds
     if (typeof sec === 'number' && sec > 0 && Number.isFinite(sec)) {
@@ -64,6 +70,16 @@ export function useMetrics() {
       }
       return [...prev, point].slice(-MAX_POINTS)
     })
+
+    try {
+      const aRes = await fetch(anomaliesUrl(12))
+      if (aRes.ok) {
+        const body = (await aRes.json()) as { items: AnomalyRow[] }
+        setAnomalies(body.items ?? [])
+      }
+    } catch {
+      /* anomalies optional */
+    }
   }, [])
 
   useEffect(() => {
@@ -158,6 +174,7 @@ export function useMetrics() {
 
   return {
     metrics,
+    anomalies,
     throughputSeries,
     error,
     loading,

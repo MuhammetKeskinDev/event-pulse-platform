@@ -5,6 +5,7 @@ import pg from "pg";
 import pino from "pino";
 
 import { EVENTS_LIVE_CHANNEL } from "../constants/realtime";
+import { detectAndPersistAnomaly } from "../services/anomaly-detector";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -18,6 +19,7 @@ const CONSUMER_NAME =
 
 const BLOCK_MS = 5000;
 const BATCH_SIZE = 32;
+const ANOMALY_INTERVAL_MS = 60_000;
 
 const connectionString =
   process.env.DATABASE_URL ??
@@ -123,12 +125,50 @@ async function run(): Promise<void> {
 
   let shuttingDown = false;
 
+  const runAnomalyJob = async (): Promise<void> => {
+    if (shuttingDown) {
+      return;
+    }
+    try {
+      const result = await detectAndPersistAnomaly(pool);
+      if (result.persisted) {
+        log.warn(
+          {
+            evalMinuteStart: result.evalMinuteStart,
+            evalCount: result.evalCount,
+            sigma: result.sigmaDistance,
+          },
+          "anomaly_critical_persisted",
+        );
+        try {
+          await redis.publish(
+            EVENTS_LIVE_CHANNEL,
+            JSON.stringify({
+              type: "anomaly_recorded",
+              severity: "critical",
+              detected_at: new Date().toISOString(),
+            }),
+          );
+        } catch (pubErr) {
+          log.warn({ pubErr }, "anomaly_ws_publish_failed");
+        }
+      }
+    } catch (err) {
+      log.error({ err }, "anomaly_detection_job_failed");
+    }
+  };
+
+  const anomalyTimer = setInterval(() => {
+    void runAnomalyJob();
+  }, ANOMALY_INTERVAL_MS);
+
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
     log.info("event_consumer_shutting_down");
+    clearInterval(anomalyTimer);
     await redis.quit();
     await pool.end();
     process.exit(0);

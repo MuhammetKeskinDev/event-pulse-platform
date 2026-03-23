@@ -2,11 +2,13 @@ import { Activity, Loader2, Radio } from 'lucide-react'
 
 import { ErrorRateGauge } from './components/ErrorRateGauge'
 import { EventSummaryTable } from './components/EventSummaryTable'
+import { RecentAnomalies } from './components/RecentAnomalies'
 import { ThroughputChart } from './components/ThroughputChart'
 import { useMetrics } from './hooks/useMetrics'
 
 function App() {
-  const { metrics, throughputSeries, error, loading, wsState } = useMetrics()
+  const { metrics, anomalies, throughputSeries, error, loading, wsState } =
+    useMetrics()
 
   const wsTone =
     wsState === 'open'
@@ -114,6 +116,10 @@ function App() {
                 {loading ? 'Loading…' : 'No data'}
               </div>
             )}
+          </section>
+
+          <section className="lg:col-span-2">
+            <RecentAnomalies items={anomalies} />
           </section>
         </div>
       </div>
