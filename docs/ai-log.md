@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 11 |
+| **Total AI interactions logged** | 12 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~305 minutes |
+| **Estimated time saved** | ~335 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -211,6 +211,24 @@
 **Validation:** `npm test` (birim); `RUN_INTEGRATION=1 npm run test:integration` (Postgres + Redis açıkken).
 
 **Quality:** 5/5 — Saf matematik birimleri + gerçek stream doğrulaması.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-012 | 2026-03-23 21:15 PM | Cursor
+
+**Category:** Utility scripts (yük üretici + DB seed)
+
+**Context:** Dökümandaki ~100 event/s kabul yükü senaryosunu manuel doğrulamak; geliştirme ortamında dashboard/metrikler için örnek `events` + örnek `anomalies` satırı.
+
+**Prompt:** `/scripts/load-gen.ts` (geçerli çoklu event türü, binlerce istek), `seed-db.ts` (örnek veri), AI-012 kaydı.
+
+**AI Output Summary:** `scripts/load-gen.ts` (API_BASE, TOTAL, RATE; saniyelik pencerede RATE kadar paralel POST; `ingestionEventSchema` ile gönderim öncesi doğrulama; özet istatistik), `scripts/seed-db.ts` (DATABASE_URL, SEED_EVENT_COUNT, isteğe bağlı SEED_TRUNCATE_EVENTS), kök `package.json` `load-gen` / `seed-db` + devDeps (`tsx`, `pg`, `zod`), `docs/ai-log.md` AI-012.
+
+**Your Modifications:** —
+
+**Validation:** `npm install`; API + worker açıkken `npm run load-gen`; TimescaleDB açıkken `npm run seed-db` (migrasyonlar uygulanmış olmalı).
+
+**Quality:** 5/5 — Şema ile hizalı üretim, tekrarlanabilir seed.
 
 **Time Impact:** Saved ~30 minutes.
 
