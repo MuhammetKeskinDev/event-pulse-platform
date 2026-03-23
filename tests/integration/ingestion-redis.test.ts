@@ -27,6 +27,7 @@ describe.skipIf(!runIntegration)("POST /api/v1/events → Redis stream", () => {
       headers: { "content-type": "application/json" },
       payload: {
         event_type: "page_view",
+        source: "web_app",
         occurred_at: "2026-03-23T12:00:00.000Z",
         payload: {
           session_id: "s-int-test",

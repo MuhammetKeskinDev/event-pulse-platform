@@ -1,18 +1,29 @@
 import { z } from "zod";
 
 /**
- * Appendix A — Ingestion event şemaları (`docs/api.md` ile hizalı).
- * Ortak zarf: event_type, isteğe bağlı event_id, occurred_at (ISO-8601), türe özel payload.
+ * PDF Appendix A: source (required), timestamp | occurred_at, optional metadata.
  */
 
 const occurredAtSchema = z.iso.datetime();
 
-const pageViewPayloadSchema = z.object({
-  session_id: z.string().min(1),
-  page_url: z.string().url(),
-  referrer: z.string().url().optional(),
-  user_id: z.string().min(1).optional(),
-});
+const pageViewPayloadSchema = z
+  .object({
+    session_id: z.string().min(1),
+    page_url: z.string().url().optional(),
+    url: z.string().min(1).optional(),
+    referrer: z.string().url().optional(),
+    user_id: z.string().min(1).optional(),
+  })
+  .refine((p) => Boolean(p.page_url || p.url), {
+    message: "Provide page_url or url (PDF Appendix A)",
+    path: ["page_url"],
+  })
+  .transform((p) => {
+    const page_url =
+      p.page_url ?? new URL(p.url!, "https://canonical.eventpulse.local").href;
+    const { url: _drop, ...rest } = p;
+    return { ...rest, page_url };
+  });
 
 const purchasePayloadSchema = z.object({
   order_id: z.string().min(1),
@@ -45,33 +56,38 @@ const systemHealthPayloadSchema = z.object({
   metric_snapshot: z.record(z.string(), z.number().finite()).optional(),
 });
 
-export const pageViewEventSchema = z.object({
-  event_type: z.literal("page_view"),
-  event_id: z.uuid().optional(),
-  occurred_at: occurredAtSchema,
-  payload: pageViewPayloadSchema,
-});
+function withPdfEnvelope<P extends z.ZodTypeAny>(
+  eventType: "page_view" | "purchase" | "error" | "system_health",
+  payloadSchema: P,
+) {
+  return z
+    .object({
+      event_type: z.literal(eventType),
+      source: z.string().min(1),
+      event_id: z.uuid().optional(),
+      occurred_at: occurredAtSchema.optional(),
+      timestamp: occurredAtSchema.optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+      payload: payloadSchema,
+    })
+    .refine((d) => d.occurred_at !== undefined || d.timestamp !== undefined, {
+      message: "Provide occurred_at or timestamp (ISO-8601, PDF Appendix A)",
+      path: ["timestamp"],
+    })
+    .transform((d) => {
+      const occurred_at = d.occurred_at ?? d.timestamp!;
+      const { timestamp: _ts, ...rest } = d;
+      return { ...rest, occurred_at };
+    });
+}
 
-export const purchaseEventSchema = z.object({
-  event_type: z.literal("purchase"),
-  event_id: z.uuid().optional(),
-  occurred_at: occurredAtSchema,
-  payload: purchasePayloadSchema,
-});
-
-export const errorEventSchema = z.object({
-  event_type: z.literal("error"),
-  event_id: z.uuid().optional(),
-  occurred_at: occurredAtSchema,
-  payload: errorPayloadSchema,
-});
-
-export const systemHealthEventSchema = z.object({
-  event_type: z.literal("system_health"),
-  event_id: z.uuid().optional(),
-  occurred_at: occurredAtSchema,
-  payload: systemHealthPayloadSchema,
-});
+export const pageViewEventSchema = withPdfEnvelope("page_view", pageViewPayloadSchema);
+export const purchaseEventSchema = withPdfEnvelope("purchase", purchasePayloadSchema);
+export const errorEventSchema = withPdfEnvelope("error", errorPayloadSchema);
+export const systemHealthEventSchema = withPdfEnvelope(
+  "system_health",
+  systemHealthPayloadSchema,
+);
 
 export const ingestionEventSchema = z.discriminatedUnion("event_type", [
   pageViewEventSchema,

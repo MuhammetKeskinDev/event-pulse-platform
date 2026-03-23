@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Activity, Loader2, Radio } from 'lucide-react'
 
 import { AnomalyTimelineChart } from './components/AnomalyTimelineChart'
@@ -8,7 +9,17 @@ import { MultiSeriesThroughputChart } from './components/MultiSeriesThroughputCh
 import { RecentAnomalies } from './components/RecentAnomalies'
 import { SystemHealthPanel } from './components/SystemHealthPanel'
 import { ToastStack } from './components/ToastStack'
-import { useMetrics } from './hooks/useMetrics'
+import {
+  useMetrics,
+  type DashboardWindowPreset,
+  type EventTypeFilterOption,
+} from './hooks/useMetrics'
+
+const WINDOW_LABEL: Record<DashboardWindowPreset, string> = {
+  15: 'Last 15 minutes',
+  60: 'Last 1 hour',
+  1440: 'Last 24 hours',
+}
 
 function App() {
   const {
@@ -21,7 +32,23 @@ function App() {
     error,
     loading,
     wsState,
+    windowPreset,
+    setWindowPreset,
+    eventTypeFilter,
+    setEventTypeFilter,
   } = useMetrics()
+
+  const anomaliesInSelectedWindow = useMemo(() => {
+    if (!metrics?.window) {
+      return anomalies
+    }
+    const start = new Date(metrics.window.start).getTime()
+    const end = new Date(metrics.window.end).getTime()
+    return anomalies.filter((a) => {
+      const t = new Date(a.detected_at).getTime()
+      return t >= start && t <= end
+    })
+  }, [anomalies, metrics?.window])
 
   const wsTone =
     wsState === 'open'
@@ -91,6 +118,39 @@ function App() {
           </div>
         ) : null}
 
+        <div className="mb-6 flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-4">
+          <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+            Time range
+            <select
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              value={windowPreset}
+              onChange={(e) =>
+                setWindowPreset(Number(e.target.value) as DashboardWindowPreset)
+              }
+            >
+              <option value={15}>15 minutes</option>
+              <option value={60}>1 hour</option>
+              <option value={1440}>24 hours</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+            Event type
+            <select
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              value={eventTypeFilter}
+              onChange={(e) =>
+                setEventTypeFilter(e.target.value as EventTypeFilterOption)
+              }
+            >
+              <option value="">All types</option>
+              <option value="page_view">page_view</option>
+              <option value="purchase">purchase</option>
+              <option value="error">error</option>
+              <option value="system_health">system_health</option>
+            </select>
+          </label>
+        </div>
+
         <div className="mb-6">
           <SystemHealthPanel health={health} />
         </div>
@@ -101,7 +161,9 @@ function App() {
               Throughput by event type
             </h2>
             <p className="mb-4 text-left text-xs text-slate-600">
-              Last hour, 5-minute buckets (GET /api/v1/metrics/throughput).
+              {WINDOW_LABEL[windowPreset]}
+              {eventTypeFilter ? ` · ${eventTypeFilter}` : ''}, 5-minute buckets
+              (GET /api/v1/metrics/throughput).
             </p>
             <MultiSeriesThroughputChart buckets={throughputBuckets} />
           </section>
@@ -137,7 +199,19 @@ function App() {
           </section>
 
           <section className="lg:col-span-2">
-            <AnomalyTimelineChart items={anomalies} />
+            {anomaliesInSelectedWindow.length > 0 ? (
+              <AnomalyTimelineChart items={anomaliesInSelectedWindow} />
+            ) : (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-500 shadow-xl shadow-black/20">
+                <p className="mb-1 font-medium text-slate-400">
+                  Anomaly timeline
+                </p>
+                <p>
+                  Seçilen zaman aralığında anomali yok. Aşağıdaki tablo, son
+                  kayıtların tamamını (zaman penceresinden bağımsız) listeler.
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="lg:col-span-2">

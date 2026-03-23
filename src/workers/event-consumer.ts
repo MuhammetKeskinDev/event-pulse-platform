@@ -11,6 +11,10 @@ import {
   EVENTS_STREAM as STREAM_KEY,
 } from "../constants/streams";
 import { detectAndPersistAnomaly } from "../services/anomaly-detector";
+import {
+  evaluateAlertRules,
+  type StreamEnvelope,
+} from "../services/rule-engine";
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? "info",
@@ -30,14 +34,6 @@ const connectionString =
 
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 
-interface StreamEnvelope {
-  event_id: string;
-  event_type: string;
-  occurred_at: string;
-  payload: unknown;
-  received_at?: string;
-}
-
 function fieldsArrayToRecord(fields: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (let i = 0; i < fields.length; i += 2) {
@@ -48,24 +44,6 @@ function fieldsArrayToRecord(fields: string[]): Record<string, string> {
     }
   }
   return out;
-}
-
-function applyCriticalErrorRule(envelope: StreamEnvelope): void {
-  if (envelope.event_type !== "error") {
-    return;
-  }
-  if (
-    typeof envelope.payload !== "object" ||
-    envelope.payload === null ||
-    !("severity" in envelope.payload) ||
-    !("message" in envelope.payload)
-  ) {
-    return;
-  }
-  const p = envelope.payload as { severity?: string; message?: string };
-  if (p.severity === "critical" && typeof p.message === "string") {
-    console.log(`CRITICAL ALERT: ${p.message}`);
-  }
 }
 
 async function ensureConsumerGroup(redis: Redis): Promise<void> {
@@ -84,18 +62,29 @@ async function ensureConsumerGroup(redis: Redis): Promise<void> {
 async function persistEvent(
   pool: pg.Pool,
   envelope: StreamEnvelope,
-): Promise<void> {
+): Promise<boolean> {
   const text = `
-    INSERT INTO events (id, event_type, occurred_at, payload)
-    VALUES ($1::uuid, $2, $3::timestamptz, $4::jsonb)
+    INSERT INTO events (id, event_type, occurred_at, payload, source, metadata)
+    VALUES ($1::uuid, $2, $3::timestamptz, $4::jsonb, $5, $6::jsonb)
     ON CONFLICT (id, occurred_at) DO NOTHING
   `;
-  await pool.query(text, [
+  const source =
+    typeof envelope.source === "string" && envelope.source.length > 0
+      ? envelope.source
+      : "unknown";
+  const metadataJson =
+    envelope.metadata !== undefined && envelope.metadata !== null
+      ? JSON.stringify(envelope.metadata)
+      : "{}";
+  const res = await pool.query(text, [
     envelope.event_id,
     envelope.event_type,
     envelope.occurred_at,
     JSON.stringify(envelope.payload),
+    source,
+    metadataJson,
   ]);
+  return (res.rowCount ?? 0) > 0;
 }
 
 const PERSIST_MAX_ATTEMPTS = 3;
@@ -110,8 +99,10 @@ async function persistOrDlq(
   let lastErr: unknown;
   for (let attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
     try {
-      applyCriticalErrorRule(envelope);
-      await persistEvent(pool, envelope);
+      const inserted = await persistEvent(pool, envelope);
+      if (inserted) {
+        await evaluateAlertRules(pool, redis, envelope, log);
+      }
       return "persisted";
     } catch (err) {
       lastErr = err;

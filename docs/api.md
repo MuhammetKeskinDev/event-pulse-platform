@@ -22,15 +22,14 @@
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `GET` | `/api/v1/metrics` | TimescaleDB `events` tablosundan metrikler (**200**). Önbellek: `Cache-Control: public, max-age=10` (panelde ~10 sn’de bir yenileme için uygundur). |
-| `GET` | `/api/v1/metrics/throughput` | Son pencerede **event_type** kırılımlı kova sayıları (PDF throughput grafiği). Sorgu: `windowMinutes` (varsayılan 60, max 1440), `bucketMinutes` (varsayılan 5, max 60). |
+| `GET` | `/api/v1/metrics` | TimescaleDB `events` metrikleri (**200**). Sorgu: `from`, `to` (ISO-8601, ikisi de verilirse özel pencere; verilmezse son 1 saat). `event_type` — yalnızca bu türü say. Önbellek: `max-age=10`. |
+| `GET` | `/api/v1/metrics/throughput` | Kova bazlı throughput. Sorgu: `windowMinutes` (15–1440), `bucketMinutes`, isteğe bağlı `event_type` (tek tür). |
 
 ### Yanıt özeti
 
-- **`window`:** Son 1 saatlik sorgu aralığı (`start` / `end`, ISO-8601).
-- **`last_hour.by_event_type`:** Son 1 saatte `event_type` başına olay sayıları.
-- **`last_hour.error_rate_percent`:** Son 1 saatte `event_type = 'error'` oranı (%).
-- **`all_time`:** Tablodaki tüm kayıtlar için toplam olay, hata sayısı ve **`error_rate_percent`** (sistem geneli hata oranı).
+- **`window`:** `label` = `last_1_hour` veya `custom`; `start` / `end` (ISO-8601).
+- **`last_hour`:** Seçilen pencerede `by_event_type`, toplam, hata oranı (alan adı geriye dönük uyumluluk için `last_hour`).
+- **`all_time`:** `from`/`to` verilmişse aynı aralığın toplamı; verilmemişse tüm tablo.
 - **`suggested_poll_interval_seconds`:** `10` (önerilen poll aralığı).
 - **`refreshed_at`:** Yanıtın üretildiği an.
 
@@ -38,6 +37,7 @@
 
 | HTTP | Gövde | Açıklama |
 |------|--------|----------|
+| 400 | `invalid_time_range` | `from` ≥ `to` |
 | 503 | `metrics_unavailable` | Veritabanı sorgusu başarısız |
 
 **Dashboard (FR-05 / FR-06):** `frontend/` Vite uygulaması geliştirmede `npm run dev` ile çalışır; `/api` ve **`/ws` WebSocket** Vite proxy ile backend’e gider. Üretim için `VITE_API_BASE` ve isteğe bağlı **`VITE_WS_BASE`** (HTTP(S) kökü; istemci `ws`/`wss`’e çevirir).
@@ -65,6 +65,20 @@ Dashboard bu mesajı alınca metrik, anomali, sağlık, throughput kovaları ve 
 { "type": "event_dlq", "message_id": "…", "event_id": "…" }
 ```
 
+Kural tetiklenince (worker):
+
+```json
+{
+  "type": "rule_triggered",
+  "rule_id": "…",
+  "rule_name": "…",
+  "severity": "warning",
+  "event_id": "…",
+  "event_type": "error",
+  "message": "…"
+}
+```
+
 ## Events — sorgu (PDF FR-08)
 
 | Yöntem | Yol | Açıklama |
@@ -72,18 +86,20 @@ Dashboard bu mesajı alınca metrik, anomali, sağlık, throughput kovaları ve 
 | `GET` | `/api/v1/events` | Filtre: `event_type`, `from`, `to` (ISO-8601), `limit` (1–100, varsayılan 50), `offset`. Yanıt: `{ items, limit, offset }`. |
 | `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). |
 
-## Rules — stub (PDF FR-04 / FR-08)
+## Rules — motor (PDF FR-04 / FR-07)
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|--------|
 | `GET` | `/api/v1/rules` | `alert_rules` tablosu (migrasyon `04_rules_retention.sql` gerekir). |
-| `POST` | `/api/v1/rules` | `{ "name", "definition"?, "enabled"?, "channel_hint"? }` — **201**. Değerlendirme motoru aşamalı genişletme. |
+| `POST` | `/api/v1/rules` | `{ "name", "definition"?, "enabled"?, "channel_hint"? }` — **201**. |
+
+**`definition`:** `event_match` veya `count_threshold` (worker); `cooldown_seconds`, `severity`. Slack: `SLACK_WEBHOOK_URL` veya `channel_hint` (https).
 
 ## Anomalies (FR-09 P1)
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `GET` | `/api/v1/anomalies?limit=10` | Son kayıtlar (**200**). `limit` 1–100, varsayılan 10. `ORDER BY detected_at DESC`. |
+| `GET` | `/api/v1/anomalies` | `limit` (1–500, varsayılan 10); isteğe bağlı `from` / `to`, `severity`, `event_type`. **400:** `invalid_from` / `invalid_to`. |
 
 **Satır alanları:** `id`, `event_type` (toplam hacim kuralı için `*`), `severity` (`critical`, `high`, `medium`, `low` vb.), `detected_at` (ISO-8601), `description` (çoğunlukla JSON; Z-score kuralı alanları).
 
@@ -113,6 +129,8 @@ Worker, `detectAndPersistAnomaly` çağrısından sonra kritik kayıt oluşursa 
 |--------|-----|----------|
 | `POST` | `/api/v1/events` | Tekil olay; doğrulama sonrası stream’e yazar, **202**. Geçersiz gövde: **422**. |
 | `POST` | `/api/v1/events/batch` | `{ "events": [ … ] }` — en fazla **500** olay (PDF FR-01). **202** + `count`, `event_ids`. |
+
+**FR-03:** `06_retention_policy.sql` — `events` hypertable üzerinde **7 gün** saklama (`add_retention_policy`).
 
 ### Yanıt (202) — tekil
 
@@ -148,14 +166,16 @@ Worker, `detectAndPersistAnomaly` çağrısından sonra kritik kayıt oluşursa 
 
 Tüm olaylar ortak bir **zarf** ve türe özel **payload** kullanır.
 
-### Ortak zarf alanları
+### Ortak zarf alanları (PDF Appendix A)
 
 | Alan | Tip | Zorunlu | Açıklama |
 |------|-----|---------|----------|
 | `event_type` | string (literal) | Evet | `page_view`, `purchase`, `error`, `system_health` |
+| `source` | string | Evet | Kaynak sistem (`web_app`, `payment_service`, …) |
 | `event_id` | UUID string | Hayır | Yoksa sunucu üretir |
-| `occurred_at` | ISO-8601 datetime | Evet | Olayın gerçekleştiği an |
-| `payload` | object | Evet | Aşağıdaki türlere göre değişir |
+| `occurred_at` **veya** `timestamp` | ISO-8601 | Biri zorunlu | PDF’de `timestamp`; ikisi de kabul edilir, içeride `occurred_at` olur |
+| `metadata` | object | Hayır | `user_id`, `session_id`, `geo`, … |
+| `payload` | object | Evet | Türe özel (aşağıda) |
 
 ---
 
@@ -166,7 +186,8 @@ Tüm olaylar ortak bir **zarf** ve türe özel **payload** kullanır.
 | Alan | Tip | Zorunlu |
 |------|-----|---------|
 | `session_id` | string | Evet |
-| `page_url` | string (URL) | Evet |
+| `page_url` | string (URL) | `page_url` veya PDF’deki `url` (göreli yol kabul; canonical base ile tam URL’ye çevrilir) |
+| `url` | string | `page_url` ile birlikte zorunlu değil; biri yeterli |
 | `referrer` | string (URL) | Hayır |
 | `user_id` | string | Hayır |
 
@@ -221,13 +242,15 @@ Tüm olaylar ortak bir **zarf** ve türe özel **payload** kullanır.
 ```json
 {
   "event_type": "page_view",
-  "occurred_at": "2026-03-23T12:00:00.000Z",
+  "source": "web_app",
+  "timestamp": "2026-03-23T12:00:00.000Z",
+  "metadata": { "user_id": "usr_1", "session_id": "sess_abc" },
   "payload": {
     "session_id": "sess_abc123",
-    "page_url": "https://example.com/pricing",
+    "url": "/pricing",
     "referrer": "https://example.com/"
   }
 }
 ```
 
-Kod tarafında doğrulama: `src/schemas/ingestion-events.ts` (Zod).
+Kod tarafında doğrulama: `src/schemas/ingestion-events.ts` (Zod). DB sütunları: migrasyon `05_events_source_metadata.sql` (`source`, `metadata`).

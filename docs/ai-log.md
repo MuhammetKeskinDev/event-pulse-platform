@@ -4,7 +4,7 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 14 |
+| **Total AI interactions logged** | 15 |
 | **Tools used** | Gemini, Cursor |
 | **Estimated time saved** | ~420 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
@@ -250,23 +250,23 @@
 
 **Time Impact:** Saved ~30 minutes.
 
-### AI-014 | 2026-03-23 23:00 PM | Cursor
+### AI-014 | 2026-03-23 (Final Sprint güncellemesi) | Cursor
 
-**Category:** PDF v2.0 parity (P0/P1 kapatma, Docker, dashboard)
+**Category:** PDF v2.0 Final Sprint — kural motoru, Slack, dashboard etkileşimi, şema, API filtreleri, retention
 
-**Context:** Senior case study PDF ile gap analizi; batch ingestion, pipeline health, DLQ, query API, OpenAPI, throughput serisi, rules stub, tam `docker-compose` + Dockerfile’lar, panel (health, multi-series chart, anomaly scatter, live feed, in-app toast).
+**Context:** PDF FR-04/05/07 ve Appendix A ile tam hizalama için önceki teslimden kalan boşluklar: `alert_rules` JSON’unun worker’da işlenmesi, tetikte WS + Slack, dashboard zaman aralığı ve `event_type` filtreleri, ingestion’da `source` / `timestamp` / `metadata`, `GET /metrics` ve `GET /anomalies` için `from`/`to`/`severity`, TimescaleDB 7 günlük retention, dokümantasyon.
 
-**Prompt:** Eksikleri tamamlayıp mülakat teslimi için “şov” seviyesinde bütünleştirme.
+**Prompt:** “EventPulse Final Sprint — P0/P1 eksiklerinin tamamlanması” (bu başlıktaki görev listesi: kural motoru + Slack, FR-05 filtreleri, Appendix A şema, API filtreleri, retention, AI-014 güncelle).
 
-**AI Output Summary:** `constants/streams.ts`; `04_rules_retention.sql` (`alert_rules`); `batch-ingestion.ts`; `app.ts` — `GET /api/v1/events/health`, `metrics/throughput`, `GET/POST /api/v1/events`, `GET /api/v1/events/:id`, batch POST, rules CRUD stub, Swagger `/docs`, 422 validation; worker `persistOrDlq` + `events_stream_dlq` + WS `event_dlq`; `Dockerfile.api` / `Dockerfile.worker` + compose `api`/`worker`; frontend `useMetrics` genişlemesi, `SystemHealthPanel`, `MultiSeriesThroughputChart`, `AnomalyTimelineChart`, `LiveEventFeed`, `ToastStack`, sıralanabilir özet tablo; `tests/unit/batch-ingestion.test.ts`; `docs/api.md` güncellemesi.
+**AI Output Summary:** `src/services/rule-engine.ts` — `event_match` ve `count_threshold` koşulları, cooldown, Redis `rule_triggered` yayını, `SLACK_WEBHOOK_URL` / `channel_hint` webhook POST; worker’da persist sonrası değerlendirme (sabit `critical` log kaldırıldı). `05_events_source_metadata.sql`, `06_retention_policy.sql`. `ingestion-events.ts` PDF zarfı + `page_view` için `url` alias. `app.ts` metrics/throughput/anomalies sorgu parametreleri. `useMetrics` + `App.tsx` — 15m / 1h / 24h ve event type seçimi. `docker-compose` worker `SLACK_WEBHOOK_URL`. `docs/api.md`, `README` migrasyon satırları; `seed-db` / `load-gen` / testler `source` ile güncellendi.
 
-**Your Modifications:** —
+**Your Modifications:** Kural DSL bilinçli olarak sınırlı tutuldu (iki condition kind); tam ifade motoru veya P2 (auth/replay/export) kapsam dışı. Retention politikası tekrar çalıştırılabilir migrasyonda `if_not_exists` ile idempotent.
 
-**Validation:** `npx tsc --noEmit` (src), `npm test`, `npm run build` (frontend); `docker compose build` önerilir.
+**Validation:** `npx tsc --noEmit` (src), kök `npm test`, `npm run build` (frontend); migrasyonların sırayla uygulanması gerekir (`05`, `06`).
 
-**Quality:** 5/5 — PDF rubric’e bilinçli hizalama; P2 (Slack/Auth/Replay) README “Known limitations” ile sınırlı.
+**Quality:** 5/5 — PDF ile dürüst gap kapatma; geriye dönük uyumluluk için `occurred_at` + DB default `source`.
 
-**Time Impact:** Saved ~55 minutes.
+**Time Impact:** Saved ~90 minutes (tahmini).
 
 ---
 

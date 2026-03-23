@@ -54,7 +54,7 @@ export function EventSummaryTable({ metrics }: Props) {
                 className="hover:text-slate-300"
                 onClick={() => toggle('count')}
               >
-                Count (last hour)
+                Count (time window)
                 {sortKey === 'count' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
               </button>
             </th>
@@ -67,7 +67,7 @@ export function EventSummaryTable({ metrics }: Props) {
                 colSpan={2}
                 className="px-4 py-8 text-center text-slate-500"
               >
-                No events in the last hour.
+                No events in this time window.
               </td>
             </tr>
           ) : (

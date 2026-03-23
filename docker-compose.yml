@@ -59,6 +59,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-eventpulse}:${POSTGRES_PASSWORD:-eventpulse_dev}@timescaledb:5432/${POSTGRES_DB:-eventpulse}
       REDIS_URL: redis://redis:6379
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
     depends_on:
       timescaledb:
         condition: service_healthy

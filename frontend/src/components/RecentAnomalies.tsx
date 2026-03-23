@@ -65,6 +65,10 @@ export function RecentAnomalies({ items }: Props) {
         </h2>
         <span className="text-xs text-slate-600">(FR-09 P1)</span>
       </div>
+      <p className="mb-3 text-left text-xs text-slate-600">
+        En son 500 kayıt (üstteki &quot;Time range&quot; bu listeyi kesmez; yalnızca
+        event type filtresi uygulanır).
+      </p>
       {items.length === 0 ? (
         <p className="text-sm text-slate-500">No anomalies recorded yet.</p>
       ) : (

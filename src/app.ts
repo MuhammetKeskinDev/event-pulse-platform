@@ -40,6 +40,23 @@ const logLevel = (process.env.LOG_LEVEL ?? "info") as
 
 const METRICS_CACHE_MAX_AGE_SEC = 10;
 
+/** Tekrarlayan query anahtarları diziye dönüşebilir; tek stringe indirger. */
+function singleQueryParam(
+  v: string | string[] | undefined,
+): string | undefined {
+  if (v === undefined) {
+    return undefined;
+  }
+  if (Array.isArray(v)) {
+    const first = v[0];
+    return typeof first === "string" ? first : undefined;
+  }
+  return v;
+}
+
+/** OpenAPI UI + JSON; keep in sync with swagger-ui `routePrefix`. */
+const SWAGGER_ROUTE_PREFIX = "/docs";
+
 const createRuleSchema = z.object({
   name: z.string().min(1).max(200),
   definition: z.record(z.string(), z.unknown()).optional(),
@@ -66,6 +83,68 @@ function errorRatePercent(errors: bigint, total: bigint): number {
   }
   const pct = (Number(errors) / Number(total)) * 100;
   return Math.round(pct * 100) / 100;
+}
+
+function parseIsoOr(raw: string | undefined, fallback: Date): Date {
+  if (raw === undefined || raw.length === 0) {
+    return fallback;
+  }
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? fallback : d;
+}
+
+/**
+ * Tüm kova aralıklarını doldurur (0 sayım). Anahtarlar SQL ile aynı: epoch saniye (bigint),
+ * float/Date yuvarlama kayması yüzünden gerçek sayımlar kaybolmasın.
+ */
+function denseThroughputBuckets(
+  sparse: Map<number, { counts: Record<string, number> }>,
+  windowStartSec: number,
+  windowEndSec: number,
+  bucketWidthSec: number,
+  eventTypeFilter: string | null,
+): Array<{ bucket_start: string; counts: Record<string, number> }> {
+  const firstBucket =
+    Math.floor(windowStartSec / bucketWidthSec) * bucketWidthSec;
+  const lastBucket =
+    Math.floor(windowEndSec / bucketWidthSec) * bucketWidthSec;
+
+  const allTypes = new Set<string>();
+  if (eventTypeFilter !== null && eventTypeFilter.length > 0) {
+    allTypes.add(eventTypeFilter);
+  } else {
+    for (const b of sparse.values()) {
+      for (const k of Object.keys(b.counts)) {
+        allTypes.add(k);
+      }
+    }
+  }
+
+  for (let t = firstBucket; t <= lastBucket; t += bucketWidthSec) {
+    if (!sparse.has(t)) {
+      sparse.set(t, { counts: {} });
+    }
+  }
+
+  const out: Array<{ bucket_start: string; counts: Record<string, number> }> =
+    [];
+  for (let t = firstBucket; t <= lastBucket; t += bucketWidthSec) {
+    const b = sparse.get(t);
+    if (b === undefined) {
+      continue;
+    }
+    const counts: Record<string, number> = { ...b.counts };
+    for (const typ of allTypes) {
+      if (counts[typ] === undefined) {
+        counts[typ] = 0;
+      }
+    }
+    out.push({
+      bucket_start: new Date(t * 1000).toISOString(),
+      counts,
+    });
+  }
+  return out;
 }
 
 async function enqueueEnvelope(
@@ -124,8 +203,17 @@ export async function buildServer(options?: { silent?: boolean }) {
   });
 
   await app.register(swaggerUi, {
-    routePrefix: "/docs",
-    uiConfig: { docExpansion: "list", deepLinking: true },
+    routePrefix: SWAGGER_ROUTE_PREFIX,
+    uiConfig: {
+      docExpansion: "list",
+      deepLinking: true,
+      urls: [
+        {
+          url: `${SWAGGER_ROUTE_PREFIX}/json`,
+          name: "Developer by Muhammet Keskin",
+        },
+      ],
+    },
   });
 
   await app.register(postgres, {
@@ -171,10 +259,19 @@ export async function buildServer(options?: { silent?: boolean }) {
     });
   });
 
-  app.get("/", async (_request, reply) => {
+  app.get(
+    "/",
+    {
+      schema: {
+        tags: ["default"],
+        summary: "Service index and endpoint map",
+        response: { 200: { type: "object", additionalProperties: true } },
+      },
+    },
+    async (_request, reply) => {
     return reply.send({
       service: "eventpulse-ingestion-api",
-      openapi: "/docs",
+      openapi: SWAGGER_ROUTE_PREFIX,
       endpoints: {
         ingest_single: { method: "POST", path: "/api/v1/events" },
         ingest_batch: { method: "POST", path: "/api/v1/events/batch" },
@@ -194,7 +291,8 @@ export async function buildServer(options?: { silent?: boolean }) {
         },
       },
     });
-  });
+    },
+  );
 
   app.get(
     "/api/v1/events/health",
@@ -258,40 +356,103 @@ export async function buildServer(options?: { silent?: boolean }) {
     },
   );
 
-  app.get("/api/v1/metrics", async (request, reply) => {
+  app.get(
+    "/api/v1/metrics",
+    {
+      schema: {
+        tags: ["metrics"],
+        summary:
+          "Aggregated metrics; optional from/to (ISO-8601), event_type filter",
+        querystring: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "ISO-8601 window start" },
+            to: { type: "string", description: "ISO-8601 window end" },
+            event_type: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     void reply.header(
       "Cache-Control",
       `public, max-age=${METRICS_CACHE_MAX_AGE_SEC}`,
     );
 
-    const windowEnd = new Date();
-    const windowStart = new Date(windowEnd.getTime() - 60 * 60 * 1000);
+    const q = request.query as Record<
+      string,
+      string | string[] | undefined
+    >;
+    const fromQ = singleQueryParam(q.from);
+    const toQ = singleQueryParam(q.to);
+    const now = new Date();
+    const hasCustom =
+      (fromQ !== undefined && fromQ.length > 0) ||
+      (toQ !== undefined && toQ.length > 0);
+    let windowEnd = parseIsoOr(toQ, now);
+    let windowStart = hasCustom
+      ? parseIsoOr(fromQ, new Date(windowEnd.getTime() - 60 * 60 * 1000))
+      : new Date(windowEnd.getTime() - 60 * 60 * 1000);
+    if (!hasCustom) {
+      windowEnd = now;
+      windowStart = new Date(windowEnd.getTime() - 60 * 60 * 1000);
+    }
+    if (windowStart >= windowEnd) {
+      return reply.status(400).send({ error: "invalid_time_range" });
+    }
+
+    const etRaw = singleQueryParam(q.event_type);
+    const eventTypeFilter =
+      etRaw !== undefined && etRaw.length > 0 ? etRaw : null;
 
     try {
-      const [distResult, allTimeResult] = await Promise.all([
-        app.pg.query<{
-          event_type: string;
-          count: string | number | bigint;
-        }>(
-          `
+      const distParams: unknown[] = [windowStart, windowEnd, eventTypeFilter];
+      const distSql = `
             SELECT event_type, COUNT(*)::bigint AS count
             FROM events
-            WHERE occurred_at >= NOW() - INTERVAL '1 hour'
+            WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
+              AND ($3::text IS NULL OR event_type = $3)
             GROUP BY event_type
             ORDER BY count DESC
-          `,
-        ),
-        app.pg.query<{
-          total: string | number | bigint;
-          errors: string | number | bigint;
-        }>(
-          `
+          `;
+
+      const allParams: unknown[] = [];
+      let allSql: string;
+      if (hasCustom) {
+        allParams.push(windowStart, windowEnd, eventTypeFilter);
+        allSql = `
             SELECT
               COUNT(*)::bigint AS total,
               COUNT(*) FILTER (WHERE event_type = 'error')::bigint AS errors
             FROM events
-          `,
-        ),
+            WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
+              AND ($3::text IS NULL OR event_type = $3)
+          `;
+      } else {
+        allParams.push(eventTypeFilter);
+        allSql = `
+            SELECT
+              COUNT(*)::bigint AS total,
+              COUNT(*) FILTER (WHERE event_type = 'error')::bigint AS errors
+            FROM events
+            WHERE ($1::text IS NULL OR event_type = $1)
+          `;
+      }
+
+      const [distResult, allTimeResult] = await Promise.all([
+        app.pg.query<{
+          event_type: string;
+          count: string | number | bigint;
+        }>(distSql, distParams),
+        app.pg.query<{
+          total: string | number | bigint;
+          errors: string | number | bigint;
+        }>(allSql, allParams),
       ]);
 
       const byEventType = distResult.rows.map((row) => ({
@@ -316,10 +477,10 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.debug({ lastHourTotal: String(lastHourTotal) }, "metrics_served");
 
       return reply.send({
-        refreshed_at: windowEnd.toISOString(),
+        refreshed_at: now.toISOString(),
         suggested_poll_interval_seconds: METRICS_CACHE_MAX_AGE_SEC,
         window: {
-          label: "last_1_hour",
+          label: hasCustom ? "custom" : "last_1_hour",
           start: windowStart.toISOString(),
           end: windowEnd.toISOString(),
         },
@@ -339,77 +500,226 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "metrics_query_failed");
       return reply.status(503).send({ error: "metrics_unavailable" });
     }
-  });
+    },
+  );
 
-  app.get("/api/v1/metrics/throughput", async (request, reply) => {
+  app.get(
+    "/api/v1/metrics/throughput",
+    {
+      schema: {
+        tags: ["metrics"],
+        summary: "Throughput buckets by event_type",
+        querystring: {
+          type: "object",
+          properties: {
+            from: { type: "string", description: "ISO-8601 (metrics ile aynı pencere)" },
+            to: { type: "string", description: "ISO-8601" },
+            windowMinutes: { type: "string" },
+            bucketMinutes: { type: "string" },
+            event_type: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     void reply.header(
       "Cache-Control",
       `public, max-age=${METRICS_CACHE_MAX_AGE_SEC}`,
     );
-    const q = request.query as { windowMinutes?: string; bucketMinutes?: string };
+    const q = request.query as Record<
+      string,
+      string | string[] | undefined
+    >;
     const windowMin = Math.min(
       24 * 60,
-      Math.max(15, Number.parseInt(q.windowMinutes ?? "60", 10) || 60),
+      Math.max(15, Number.parseInt(singleQueryParam(q.windowMinutes) ?? "60", 10) || 60),
     );
-    const bucketMin = Math.min(60, Math.max(1, Number.parseInt(q.bucketMinutes ?? "5", 10) || 5));
+    const bucketMin = Math.min(
+      60,
+      Math.max(1, Number.parseInt(singleQueryParam(q.bucketMinutes) ?? "5", 10) || 5),
+    );
+    const etRaw = singleQueryParam(q.event_type);
+    const et =
+      etRaw !== undefined && etRaw.length > 0 ? etRaw : null;
+
+    const bucketWidthSec = bucketMin * 60;
+    const now = new Date();
+    const fromQ = singleQueryParam(q.from);
+    const toQ = singleQueryParam(q.to);
+    const hasBounds =
+      fromQ !== undefined &&
+      fromQ.length > 0 &&
+      toQ !== undefined &&
+      toQ.length > 0;
+    let windowEnd = parseIsoOr(toQ, now);
+    let windowStart = hasBounds
+      ? parseIsoOr(fromQ, new Date(windowEnd.getTime() - windowMin * 60_000))
+      : new Date(windowEnd.getTime() - windowMin * 60_000);
+    if (!hasBounds) {
+      windowEnd = now;
+      windowStart = new Date(windowEnd.getTime() - windowMin * 60_000);
+    }
+    if (windowStart >= windowEnd) {
+      return reply.status(400).send({ error: "invalid_time_range" });
+    }
+    const windowStartSec = Math.floor(windowStart.getTime() / 1000);
+    const windowEndSec = Math.floor(windowEnd.getTime() / 1000);
 
     try {
-      const rows = await app.pg.query<{
-        bucket_start: Date;
-        event_type: string;
-        c: string;
-      }>(
-        `
+      const rows = hasBounds
+        ? await app.pg.query<{
+            bucket_epoch: string;
+            event_type: string;
+            c: string;
+          }>(
+            `
           SELECT
-            to_timestamp(
-              floor(EXTRACT(EPOCH FROM occurred_at) / ($2::float * 60.0))
-              * ($2::float * 60.0)
-            ) AT TIME ZONE 'UTC' AS bucket_start,
+            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $4::bigint) * $4::bigint)::text AS bucket_epoch,
+            event_type,
+            COUNT(*)::text AS c
+          FROM events
+          WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
+            AND ($3::text IS NULL OR event_type = $3)
+          GROUP BY 1, 2
+          ORDER BY 1 ASC
+        `,
+            [windowStart, windowEnd, et, bucketWidthSec],
+          )
+        : await app.pg.query<{
+            bucket_epoch: string;
+            event_type: string;
+            c: string;
+          }>(
+            `
+          SELECT
+            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $3::bigint) * $3::bigint)::text AS bucket_epoch,
             event_type,
             COUNT(*)::text AS c
           FROM events
           WHERE occurred_at >= NOW() - ($1::int * INTERVAL '1 minute')
+            AND ($2::text IS NULL OR event_type = $2)
           GROUP BY 1, 2
           ORDER BY 1 ASC
         `,
-        [windowMin, bucketMin],
-      );
+            [windowMin, et, bucketWidthSec],
+          );
 
-      const bucketMap = new Map<
-        string,
-        { bucket_start: string; counts: Record<string, number> }
-      >();
+      const bucketMap = new Map<number, { counts: Record<string, number> }>();
 
       for (const row of rows.rows) {
-        const iso =
-          row.bucket_start instanceof Date
-            ? row.bucket_start.toISOString()
-            : String(row.bucket_start);
-        let b = bucketMap.get(iso);
+        const aligned = Number.parseInt(row.bucket_epoch, 10);
+        if (!Number.isFinite(aligned)) {
+          continue;
+        }
+        let b = bucketMap.get(aligned);
         if (!b) {
-          b = { bucket_start: iso, counts: {} };
-          bucketMap.set(iso, b);
+          b = { counts: {} };
+          bucketMap.set(aligned, b);
         }
         b.counts[row.event_type] = Number(row.c);
       }
 
+      const buckets = denseThroughputBuckets(
+        bucketMap,
+        windowStartSec,
+        windowEndSec,
+        bucketWidthSec,
+        et,
+      );
+
+      const windowMinutesReported = Math.max(
+        1,
+        Math.round((windowEnd.getTime() - windowStart.getTime()) / 60_000),
+      );
+
       return reply.send({
-        window_minutes: windowMin,
+        window_minutes: windowMinutesReported,
         bucket_minutes: bucketMin,
-        buckets: [...bucketMap.values()],
+        event_type_filter: et,
+        buckets,
       });
     } catch (err) {
       request.log.error({ err }, "throughput_series_failed");
       return reply.status(503).send({ error: "throughput_unavailable" });
     }
-  });
+    },
+  );
 
-  app.get("/api/v1/anomalies", async (request, reply) => {
-    const raw = (request.query as { limit?: string }).limit;
+  app.get(
+    "/api/v1/anomalies",
+    {
+      schema: {
+        tags: ["query"],
+        summary: "List detected anomalies",
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+            severity: { type: "string" },
+            event_type: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
+    const aq = request.query as Record<
+      string,
+      string | string[] | undefined
+    >;
+    const raw = singleQueryParam(aq.limit);
     const parsed = raw !== undefined ? Number.parseInt(raw, 10) : 10;
     const limit = Number.isFinite(parsed)
-      ? Math.min(100, Math.max(1, parsed))
+      ? Math.min(500, Math.max(1, parsed))
       : 10;
+
+    const params: unknown[] = [];
+    const where: string[] = ["1=1"];
+    let p = 1;
+    const fromA = singleQueryParam(aq.from);
+    const toA = singleQueryParam(aq.to);
+    const sevA = singleQueryParam(aq.severity);
+    const etA = singleQueryParam(aq.event_type);
+    if (fromA !== undefined && fromA.length > 0) {
+      const fromD = new Date(fromA);
+      if (Number.isNaN(fromD.getTime())) {
+        return reply.status(400).send({ error: "invalid_from" });
+      }
+      where.push(`detected_at >= $${p}::timestamptz`);
+      params.push(fromD.toISOString());
+      p += 1;
+    }
+    if (toA !== undefined && toA.length > 0) {
+      const toD = new Date(toA);
+      if (Number.isNaN(toD.getTime())) {
+        return reply.status(400).send({ error: "invalid_to" });
+      }
+      where.push(`detected_at < $${p}::timestamptz`);
+      params.push(toD.toISOString());
+      p += 1;
+    }
+    if (sevA !== undefined && sevA.length > 0) {
+      where.push(`severity = $${p}`);
+      params.push(sevA);
+      p += 1;
+    }
+    if (etA !== undefined && etA.length > 0) {
+      where.push(`event_type = $${p}`);
+      params.push(etA);
+      p += 1;
+    }
+    params.push(limit);
 
     try {
       const result = await app.pg.query<{
@@ -422,10 +732,11 @@ export async function buildServer(options?: { silent?: boolean }) {
         `
           SELECT id, event_type, severity, detected_at, description
           FROM anomalies
+          WHERE ${where.join(" AND ")}
           ORDER BY detected_at DESC
-          LIMIT $1
+          LIMIT $${p}
         `,
-        [limit],
+        params,
       );
 
       return reply.send({
@@ -444,38 +755,67 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "anomalies_query_failed");
       return reply.status(503).send({ error: "anomalies_unavailable" });
     }
-  });
+    },
+  );
 
-  app.get("/api/v1/events", async (request, reply) => {
-    const q = request.query as {
-      event_type?: string;
-      from?: string;
-      to?: string;
-      limit?: string;
-      offset?: string;
-    };
+  app.get(
+    "/api/v1/events",
+    {
+      schema: {
+        tags: ["query"],
+        summary: "Query events with filters and pagination",
+        querystring: {
+          type: "object",
+          properties: {
+            event_type: { type: "string" },
+            from: { type: "string" },
+            to: { type: "string" },
+            limit: { type: "string" },
+            offset: { type: "string" },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
+    const q = request.query as Record<
+      string,
+      string | string[] | undefined
+    >;
     const limit = Math.min(
       100,
-      Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50),
+      Math.max(
+        1,
+        Number.parseInt(singleQueryParam(q.limit) ?? "50", 10) || 50,
+      ),
     );
-    const offset = Math.max(0, Number.parseInt(q.offset ?? "0", 10) || 0);
+    const offset = Math.max(
+      0,
+      Number.parseInt(singleQueryParam(q.offset) ?? "0", 10) || 0,
+    );
 
     const params: unknown[] = [];
     let p = 1;
     const where: string[] = ["1=1"];
-    if (q.event_type !== undefined && q.event_type.length > 0) {
+    const etEv = singleQueryParam(q.event_type);
+    const fromEv = singleQueryParam(q.from);
+    const toEv = singleQueryParam(q.to);
+    if (etEv !== undefined && etEv.length > 0) {
       where.push(`event_type = $${p}`);
-      params.push(q.event_type);
+      params.push(etEv);
       p += 1;
     }
-    if (q.from !== undefined && q.from.length > 0) {
+    if (fromEv !== undefined && fromEv.length > 0) {
       where.push(`occurred_at >= $${p}::timestamptz`);
-      params.push(q.from);
+      params.push(fromEv);
       p += 1;
     }
-    if (q.to !== undefined && q.to.length > 0) {
+    if (toEv !== undefined && toEv.length > 0) {
       where.push(`occurred_at < $${p}::timestamptz`);
-      params.push(q.to);
+      params.push(toEv);
       p += 1;
     }
     params.push(limit, offset);
@@ -514,9 +854,29 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "events_query_failed");
       return reply.status(503).send({ error: "events_unavailable" });
     }
-  });
+    },
+  );
 
-  app.get<{ Params: { id: string } }>("/api/v1/events/:id", async (request, reply) => {
+  app.get<{ Params: { id: string } }>(
+    "/api/v1/events/:id",
+    {
+      schema: {
+        tags: ["query"],
+        summary: "Get one event by UUID (latest occurrence row)",
+        params: {
+          type: "object",
+          properties: { id: { type: "string", format: "uuid" } },
+          required: ["id"],
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          400: { type: "object", additionalProperties: true },
+          404: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     const id = request.params.id;
     if (!/^[0-9a-f-]{36}$/i.test(id)) {
       return reply.status(400).send({ error: "invalid_event_id" });
@@ -554,9 +914,22 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "event_by_id_failed");
       return reply.status(503).send({ error: "events_unavailable" });
     }
-  });
+    },
+  );
 
-  app.get("/api/v1/rules", async (request, reply) => {
+  app.get(
+    "/api/v1/rules",
+    {
+      schema: {
+        tags: ["rules"],
+        summary: "List alert rules (stub)",
+        response: {
+          200: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     try {
       const result = await app.pg.query<{
         id: string;
@@ -590,9 +963,24 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "rules_list_failed");
       return reply.status(503).send({ error: "rules_unavailable" });
     }
-  });
+    },
+  );
 
-  app.post("/api/v1/rules", async (request, reply) => {
+  app.post(
+    "/api/v1/rules",
+    {
+      schema: {
+        tags: ["rules"],
+        summary: "Create alert rule (stub)",
+        body: { type: "object", additionalProperties: true },
+        response: {
+          201: { type: "object", additionalProperties: true },
+          422: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = createRuleSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(422).send({
@@ -621,9 +1009,24 @@ export async function buildServer(options?: { silent?: boolean }) {
       request.log.error({ err }, "rules_create_failed");
       return reply.status(503).send({ error: "rules_unavailable" });
     }
-  });
+    },
+  );
 
-  app.post("/api/v1/events", async (request, reply) => {
+  app.post(
+    "/api/v1/events",
+    {
+      schema: {
+        tags: ["ingestion"],
+        summary: "Ingest single event (202 + Redis stream)",
+        body: { type: "object", additionalProperties: true },
+        response: {
+          202: { type: "object", additionalProperties: true },
+          422: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = ingestionEventSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -640,6 +1043,8 @@ export async function buildServer(options?: { silent?: boolean }) {
       event_id: eventId,
       event_type: body.event_type,
       occurred_at: body.occurred_at,
+      source: body.source,
+      metadata: body.metadata,
       payload: body.payload,
       received_at: new Date().toISOString(),
     };
@@ -660,9 +1065,24 @@ export async function buildServer(options?: { silent?: boolean }) {
       status: "accepted",
       event_id: eventId,
     });
-  });
+    },
+  );
 
-  app.post("/api/v1/events/batch", async (request, reply) => {
+  app.post(
+    "/api/v1/events/batch",
+    {
+      schema: {
+        tags: ["ingestion"],
+        summary: "Ingest up to 500 events",
+        body: { type: "object", additionalProperties: true },
+        response: {
+          202: { type: "object", additionalProperties: true },
+          422: { type: "object", additionalProperties: true },
+          503: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    async (request, reply) => {
     const parsed = batchIngestionSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(422).send({
@@ -680,6 +1100,8 @@ export async function buildServer(options?: { silent?: boolean }) {
           event_id: eventId,
           event_type: ev.event_type,
           occurred_at: ev.occurred_at,
+          source: ev.source,
+          metadata: ev.metadata,
           payload: ev.payload,
           received_at: new Date().toISOString(),
         };
@@ -697,7 +1119,8 @@ export async function buildServer(options?: { silent?: boolean }) {
       count: event_ids.length,
       event_ids,
     });
-  });
+    },
+  );
 
   app.setErrorHandler((err, request, reply) => {
     request.log.error({ err }, "Unhandled error");

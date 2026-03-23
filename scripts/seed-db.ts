@@ -5,6 +5,9 @@
  * - SEED_TRUNCATE_EVENTS=1 — events tablosunu temizler (dashboard sıfırdan dolar)
  * - SEED_EVENT_COUNT — eklenen event sayısı (varsayılan: 150)
  *
+ * Zaman dağılımı: çoğu kayıt son ~90 dk içinde (15m/1h dashboard penceresi dolu kalsın);
+ * kalanı son 48 saate yayılır (24h filtresi testi).
+ *
  * Çalıştırma (proje kökü): npm run seed-db
  */
 
@@ -90,14 +93,17 @@ async function main(): Promise<void> {
     const now = Date.now();
     const rows: EventRow[] = [];
     for (let i = 0; i < EVENT_COUNT; i++) {
-      const offsetMs = Math.floor(Math.random() * 48 * 60 * 60 * 1000);
+      const offsetMs =
+        Math.random() < 0.7
+          ? Math.floor(Math.random() * 90 * 60 * 1000)
+          : Math.floor(Math.random() * 48 * 60 * 60 * 1000);
       rows.push(randomEventAt(new Date(now - offsetMs)));
     }
     rows.sort((a, b) => a.occurred_at.getTime() - b.occurred_at.getTime());
 
     const insertSql = `
-      INSERT INTO events (id, event_type, occurred_at, payload)
-      VALUES ($1, $2, $3, $4::jsonb)
+      INSERT INTO events (id, event_type, occurred_at, payload, source, metadata)
+      VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb)
     `;
 
     for (const row of rows) {
@@ -106,6 +112,8 @@ async function main(): Promise<void> {
         row.event_type,
         row.occurred_at,
         JSON.stringify(row.payload),
+        "seed_script",
+        JSON.stringify({ seeded: true }),
       ]);
     }
 

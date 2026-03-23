@@ -39,6 +39,7 @@ function buildRandomEvent(): unknown {
     case "page_view":
       return {
         event_type: "page_view",
+        source: "web_app",
         occurred_at: isoRecentMs(3_600_000),
         payload: {
           session_id: `sess_${randomUUID().slice(0, 8)}`,
@@ -74,6 +75,7 @@ function buildRandomEvent(): unknown {
     case "error":
       return {
         event_type: "error",
+        source: "payment_service",
         occurred_at: isoRecentMs(1_800_000),
         payload: {
           error_code: pick(["E_TIMEOUT", "E_DB", "E_AUTH", "E_RATE", "E_UNK"] as const),
@@ -95,6 +97,7 @@ function buildRandomEvent(): unknown {
     default:
       return {
         event_type: "system_health",
+        source: "api_gateway",
         occurred_at: isoRecentMs(600_000),
         payload: {
           component: pick(["redis", "postgres", "worker", "api"] as const),

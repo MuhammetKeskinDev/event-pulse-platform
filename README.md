@@ -79,7 +79,11 @@ Get-Content -Raw src\db\migrations\01_init_schema.sql | docker exec -i eventpuls
 Get-Content -Raw src\db\migrations\02_anomalies.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 Get-Content -Raw src\db\migrations\03_anomalies_p1_columns.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 Get-Content -Raw src\db\migrations\04_rules_retention.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
+Get-Content -Raw src\db\migrations\05_events_source_metadata.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
+Get-Content -Raw src\db\migrations\06_retention_policy.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 ```
+
+**Worker — Slack (isteğe bağlı):** `docker compose` içinde `SLACK_WEBHOOK_URL` ortam değişkeni worker’a iletilir; kural tetiklenince webhook’a POST yapılır.
 
 ### 4. Örnek veri (isteğe bağlı)
 
@@ -160,10 +164,10 @@ Son **15 tam dakika** baseline, son tamamlanmış **1 dakika** hacmi ile karşı
 
 ## Bilinen sınırlar (PDF P2 / sonraki sprint)
 
-- **FR-07:** Slack / e-posta bildirimi yok (kanal stub: `alert_rules.channel_hint`).
+- **FR-07:** Slack — worker `SLACK_WEBHOOK_URL` veya kural `channel_hint` (https URL) ile webhook POST; e-posta yok.
 - **FR-10 / FR-11 / FR-12:** Auth, replay, CSV/PDF export — tasarlanmış, uygulanmadı.
 - **PDF Appendix A:** Üst seviye `source` / `metadata` / `timestamp` alan adları yerine mevcut `occurred_at` + payload şeması kullanılıyor (`docs/api.md` Appendix A).
-- **Kural motoru:** `alert_rules` satırları saklanır; dinamik DSL değerlendirmesi genişletme adımıdır (Z-score + critical `error` kuralı çalışır).
+- **Kural motoru:** Worker `definition` içinde `event_match` ve `count_threshold` okur; tam ifade DSL’si veya PUT/DELETE rules sonraki adımdır.
 - **Test kapsamı:** Anomali + batch şema birim testleri var; %80 satır kapsamı hedefi için ek test önerilir.
 
 ## Lisans

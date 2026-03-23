@@ -5,11 +5,27 @@ import { ingestionEventSchema } from "@src/schemas/ingestion-events";
 
 const validEvent = ingestionEventSchema.parse({
   event_type: "page_view",
+  source: "web_app",
   occurred_at: "2026-03-23T12:00:00.000Z",
   payload: {
     session_id: "s",
     page_url: "https://example.com/",
   },
+});
+
+describe("ingestionEventSchema (PDF Appendix A)", () => {
+  it("timestamp ile occurred_at yerine kabul eder", () => {
+    const r = ingestionEventSchema.safeParse({
+      event_type: "page_view",
+      source: "web_app",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: { session_id: "s", url: "/products/x" },
+    });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.occurred_at).toBe("2026-01-01T00:00:00.000Z");
+    }
+  });
 });
 
 describe("batchIngestionSchema", () => {

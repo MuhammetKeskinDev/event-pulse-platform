@@ -17,24 +17,80 @@ export type WsConnectionState =
   | 'reconnecting'
   | 'closed'
 
-function metricsUrl(): string {
-  return `${API_BASE}/api/v1/metrics`
+/** Dashboard time range (minutes) — PDF FR-05 */
+export type DashboardWindowPreset = 15 | 60 | 1440
+
+export type EventTypeFilterOption =
+  | ''
+  | 'page_view'
+  | 'purchase'
+  | 'error'
+  | 'system_health'
+
+function rangeForPreset(preset: DashboardWindowPreset): {
+  from: string
+  to: string
+} {
+  const to = new Date()
+  const from = new Date(to.getTime() - preset * 60_000)
+  return { from: from.toISOString(), to: to.toISOString() }
 }
 
-function anomaliesUrl(limit: number): string {
-  return `${API_BASE}/api/v1/anomalies?limit=${limit}`
+function metricsUrl(
+  from: string,
+  to: string,
+  eventType: EventTypeFilterOption,
+): string {
+  const p = new URLSearchParams({ from, to })
+  if (eventType.length > 0) {
+    p.set('event_type', eventType)
+  }
+  return `${API_BASE}/api/v1/metrics?${p.toString()}`
+}
+
+/** Tablo: zaman penceresine bağlı değil — son N kayıt (dashboard metrikleriyle aynı from/to kullanılmaz). */
+function anomaliesRecentListUrl(
+  eventType: EventTypeFilterOption,
+  limit: number,
+): string {
+  const p = new URLSearchParams({ limit: String(limit) })
+  if (eventType.length > 0) {
+    p.set("event_type", eventType)
+  }
+  return `${API_BASE}/api/v1/anomalies?${p.toString()}`
 }
 
 function healthUrl(): string {
   return `${API_BASE}/api/v1/events/health`
 }
 
-function throughputUrl(): string {
-  return `${API_BASE}/api/v1/metrics/throughput?windowMinutes=60&bucketMinutes=5`
+function throughputUrl(
+  from: string,
+  to: string,
+  preset: DashboardWindowPreset,
+  eventType: EventTypeFilterOption,
+): string {
+  const p = new URLSearchParams({
+    from,
+    to,
+    windowMinutes: String(preset),
+    bucketMinutes: '5',
+  })
+  if (eventType.length > 0) {
+    p.set('event_type', eventType)
+  }
+  return `${API_BASE}/api/v1/metrics/throughput?${p.toString()}`
 }
 
-function recentEventsUrl(): string {
-  return `${API_BASE}/api/v1/events?limit=15`
+function recentEventsUrl(
+  eventType: EventTypeFilterOption,
+  limit: number,
+): string {
+  const p = new URLSearchParams({ limit: String(limit) })
+  if (eventType.length > 0) {
+    p.set('event_type', eventType)
+  }
+  return `${API_BASE}/api/v1/events?${p.toString()}`
 }
 
 function wsEventsUrl(): string {
@@ -52,6 +108,11 @@ function wsEventsUrl(): string {
 }
 
 export function useMetrics() {
+  const [windowPreset, setWindowPreset] =
+    useState<DashboardWindowPreset>(60)
+  const [eventTypeFilter, setEventTypeFilter] =
+    useState<EventTypeFilterOption>('')
+
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [anomalies, setAnomalies] = useState<AnomalyRow[]>([])
   const [throughputBuckets, setThroughputBuckets] = useState<ThroughputBucket[]>(
@@ -74,7 +135,10 @@ export function useMetrics() {
   }, [])
 
   const fetchOnce = useCallback(async () => {
-    const mRes = await fetch(metricsUrl())
+    const { from, to } = rangeForPreset(windowPreset)
+    const mRes = await fetch(metricsUrl(from, to, eventTypeFilter), {
+      cache: 'no-store',
+    })
     if (!mRes.ok) {
       throw new Error(`HTTP ${mRes.status}`)
     }
@@ -86,7 +150,7 @@ export function useMetrics() {
     }
 
     try {
-      const hRes = await fetch(healthUrl())
+      const hRes = await fetch(healthUrl(), { cache: 'no-store' })
       if (hRes.ok) {
         setHealth((await hRes.json()) as PipelineHealth)
       }
@@ -95,7 +159,10 @@ export function useMetrics() {
     }
 
     try {
-      const tRes = await fetch(throughputUrl())
+      const tRes = await fetch(
+        throughputUrl(from, to, windowPreset, eventTypeFilter),
+        { cache: 'no-store' },
+      )
       if (tRes.ok) {
         const tb = (await tRes.json()) as { buckets?: ThroughputBucket[] }
         setThroughputBuckets(tb.buckets ?? [])
@@ -105,7 +172,9 @@ export function useMetrics() {
     }
 
     try {
-      const eRes = await fetch(recentEventsUrl())
+      const eRes = await fetch(recentEventsUrl(eventTypeFilter, 15), {
+        cache: 'no-store',
+      })
       if (eRes.ok) {
         const eb = (await eRes.json()) as { items?: LiveEventRow[] }
         setLiveEvents(eb.items ?? [])
@@ -115,7 +184,9 @@ export function useMetrics() {
     }
 
     try {
-      const aRes = await fetch(anomaliesUrl(10))
+      const aRes = await fetch(anomaliesRecentListUrl(eventTypeFilter, 500), {
+        cache: 'no-store',
+      })
       if (aRes.ok) {
         const body = (await aRes.json()) as { items: AnomalyRow[] }
         setAnomalies(body.items ?? [])
@@ -123,7 +194,7 @@ export function useMetrics() {
     } catch {
       /* optional */
     }
-  }, [])
+  }, [windowPreset, eventTypeFilter])
 
   useEffect(() => {
     let cancelled = false
@@ -189,6 +260,9 @@ export function useMetrics() {
           const msg = JSON.parse(ev.data as string) as {
             type?: string
             event_type?: string
+            message?: string
+            rule_name?: string
+            rule_id?: string
           }
           if (msg.type === 'event_processed' && msg.event_type) {
             pushToast(`Processed: ${msg.event_type}`)
@@ -196,6 +270,12 @@ export function useMetrics() {
             pushToast('Anomaly recorded (critical)')
           } else if (msg.type === 'event_dlq') {
             pushToast('Event moved to DLQ after retries')
+          } else if (msg.type === 'rule_triggered') {
+            const line =
+              typeof msg.message === 'string' && msg.message.length > 0
+                ? msg.message
+                : `Rule fired: ${msg.rule_name ?? msg.rule_id ?? 'unknown'}`
+            pushToast(line)
           }
         } catch {
           /* non-json */
@@ -230,6 +310,17 @@ export function useMetrics() {
     }
   }, [fetchOnce, pushToast])
 
+  useEffect(() => {
+    if (wsState !== 'open') {
+      return
+    }
+    void fetchOnce()
+      .then(() => setError(null))
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : 'Failed to load metrics'),
+      )
+  }, [windowPreset, eventTypeFilter, wsState, fetchOnce])
+
   return {
     metrics,
     anomalies,
@@ -241,6 +332,10 @@ export function useMetrics() {
     loading,
     pollIntervalSeconds,
     wsState,
+    windowPreset,
+    setWindowPreset,
+    eventTypeFilter,
+    setEventTypeFilter,
     transport: 'websocket' as const,
   }
 }
