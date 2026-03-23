@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 13 |
+| **Total AI interactions logged** | 14 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~365 minutes |
+| **Estimated time saved** | ~420 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -249,6 +249,24 @@
 **Quality:** 5/5 — Mevcut WS tabanlı `fetchOnce` ile anomali listesi her yenilemede güncellenir.
 
 **Time Impact:** Saved ~30 minutes.
+
+### AI-014 | 2026-03-23 23:00 PM | Cursor
+
+**Category:** PDF v2.0 parity (P0/P1 kapatma, Docker, dashboard)
+
+**Context:** Senior case study PDF ile gap analizi; batch ingestion, pipeline health, DLQ, query API, OpenAPI, throughput serisi, rules stub, tam `docker-compose` + Dockerfile’lar, panel (health, multi-series chart, anomaly scatter, live feed, in-app toast).
+
+**Prompt:** Eksikleri tamamlayıp mülakat teslimi için “şov” seviyesinde bütünleştirme.
+
+**AI Output Summary:** `constants/streams.ts`; `04_rules_retention.sql` (`alert_rules`); `batch-ingestion.ts`; `app.ts` — `GET /api/v1/events/health`, `metrics/throughput`, `GET/POST /api/v1/events`, `GET /api/v1/events/:id`, batch POST, rules CRUD stub, Swagger `/docs`, 422 validation; worker `persistOrDlq` + `events_stream_dlq` + WS `event_dlq`; `Dockerfile.api` / `Dockerfile.worker` + compose `api`/`worker`; frontend `useMetrics` genişlemesi, `SystemHealthPanel`, `MultiSeriesThroughputChart`, `AnomalyTimelineChart`, `LiveEventFeed`, `ToastStack`, sıralanabilir özet tablo; `tests/unit/batch-ingestion.test.ts`; `docs/api.md` güncellemesi.
+
+**Your Modifications:** —
+
+**Validation:** `npx tsc --noEmit` (src), `npm test`, `npm run build` (frontend); `docker compose build` önerilir.
+
+**Quality:** 5/5 — PDF rubric’e bilinçli hizalama; P2 (Slack/Auth/Replay) README “Known limitations” ile sınırlı.
+
+**Time Impact:** Saved ~55 minutes.
 
 ---
 

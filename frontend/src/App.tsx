@@ -1,14 +1,27 @@
 import { Activity, Loader2, Radio } from 'lucide-react'
 
+import { AnomalyTimelineChart } from './components/AnomalyTimelineChart'
 import { ErrorRateGauge } from './components/ErrorRateGauge'
 import { EventSummaryTable } from './components/EventSummaryTable'
+import { LiveEventFeed } from './components/LiveEventFeed'
+import { MultiSeriesThroughputChart } from './components/MultiSeriesThroughputChart'
 import { RecentAnomalies } from './components/RecentAnomalies'
-import { ThroughputChart } from './components/ThroughputChart'
+import { SystemHealthPanel } from './components/SystemHealthPanel'
+import { ToastStack } from './components/ToastStack'
 import { useMetrics } from './hooks/useMetrics'
 
 function App() {
-  const { metrics, anomalies, throughputSeries, error, loading, wsState } =
-    useMetrics()
+  const {
+    metrics,
+    anomalies,
+    throughputBuckets,
+    health,
+    liveEvents,
+    toasts,
+    error,
+    loading,
+    wsState,
+  } = useMetrics()
 
   const wsTone =
     wsState === 'open'
@@ -27,6 +40,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+      <ToastStack toasts={toasts} />
       <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -38,7 +52,7 @@ function App() {
                 EventPulse
               </h1>
               <p className="text-sm text-slate-500">
-                FR-05 / FR-06 · metrics over WebSocket
+                PDF P0/P1 — WebSocket + multi-series throughput + health
               </p>
             </div>
           </div>
@@ -53,12 +67,12 @@ function App() {
               />
             ) : null}
             <span>
-              Updates on each processed event (WS{' '}
-              <span className="font-mono text-slate-400">/ws/events</span>)
+              In-app toasts on WS ·{' '}
+              <span className="font-mono text-slate-400">/ws/events</span>
               {metrics?.refreshed_at ? (
                 <>
                   {' '}
-                  · Metrics at{' '}
+                  · Metrics{' '}
                   <span className="font-mono text-slate-400">
                     {new Date(metrics.refreshed_at).toLocaleTimeString()}
                   </span>
@@ -73,19 +87,23 @@ function App() {
             className="mb-6 rounded-xl border border-red-900/50 bg-red-950/40 px-4 py-3 text-sm text-red-200"
             role="alert"
           >
-            {error} — Retrying on the next interval.
+            {error} — Retrying on the next WS message.
           </div>
         ) : null}
+
+        <div className="mb-6">
+          <SystemHealthPanel health={health} />
+        </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20 lg:col-span-2">
             <h2 className="mb-1 text-left text-sm font-medium text-slate-400">
-              Throughput
+              Throughput by event type
             </h2>
             <p className="mb-4 text-left text-xs text-slate-600">
-              Total events in the rolling 1-hour window (one sample per metrics refresh).
+              Last hour, 5-minute buckets (GET /api/v1/metrics/throughput).
             </p>
-            <ThroughputChart data={throughputSeries} />
+            <MultiSeriesThroughputChart buckets={throughputBuckets} />
           </section>
 
           <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20">
@@ -119,7 +137,15 @@ function App() {
           </section>
 
           <section className="lg:col-span-2">
+            <AnomalyTimelineChart items={anomalies} />
+          </section>
+
+          <section className="lg:col-span-2">
             <RecentAnomalies items={anomalies} />
+          </section>
+
+          <section className="lg:col-span-2">
+            <LiveEventFeed items={liveEvents} />
           </section>
         </div>
       </div>

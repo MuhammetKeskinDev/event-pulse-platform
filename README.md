@@ -4,7 +4,7 @@
 
 **Vizyon:** Yüksek hacimli olayları güvenilir biçimde toplayan, **Redis Streams** ile API’den ayıran ve **TimescaleDB** üzerinde zaman serisi olarak saklayan bir platform. Amaç; operatörün metrik ve anomalileri görebildiği, kabul katmanında **P95 gecikmesinin 200 ms altında** tutulması hedeflenen (vaka gereksinimi) olay altyapısı sunmaktır.
 
-**Ne içerir:** Fastify + TypeScript ingestion API (`202` + stream’e yazma), stream tüketen worker, metrik uçları, WebSocket ile canlı dashboard köprüsü, dakika bazlı Z-score anomali tespiti, Vitest testleri ve `load-gen` / `seed-db` yardımcı scriptleri.
+**Ne içerir:** Fastify + TypeScript — **tekil + batch** ingestion, **OpenAPI `/docs`**, **pipeline health**, **DLQ** (3 deneme sonrası), **event sorgu API**, **rules** tablosu (stub CRUD), throughput **zaman kovaları** (`/metrics/throughput`), stream worker, WebSocket + **in-app toast**, Z-score anomali, Vitest, `load-gen` / `seed-db`, **Dockerfile + docker-compose** ile API ve worker konteynerleri.
 
 ---
 
@@ -28,6 +28,7 @@
 ┌─────────────────┐       XREADGROUP + işleme        ┌─────────────────────────────┐
 │  Redis Streams   │ ──────────────────────────────► │  Worker süreci              │
 │  events_stream   │                                 │  • insert TimescaleDB       │
+│  + DLQ stream    │                                 │  • 3x retry → DLQ + XACK    │
 └─────────────────┘                                 │  • XACK (başarıda)          │
          ▲                                            │  • anomali job (periyodik)  │
          │ PUB (canlı)                                │  • PUB eventpulse:events_live │
@@ -49,15 +50,17 @@
 
 ## Hızlı kurulum
 
-### 1. Altyapı
+### 1. Altyapı (tam yığın — PDF)
 
-Proje kökünde:
+Proje kökünde (ilk seferde imaj derlenir):
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-**TimescaleDB** (`5432`) ve **Redis** (`6379`) ayağa kalkar.
+**TimescaleDB**, **Redis**, **API** (`3000`), **worker** birlikte kalkar. Yalnızca veri katmanı için: `docker compose up -d timescaledb redis`.
+
+**OpenAPI:** http://127.0.0.1:3000/docs
 
 ### 2. Bağımlılıklar (kök)
 
@@ -75,6 +78,7 @@ Migrasyonları sırayla uygulayın (PowerShell örneği):
 Get-Content -Raw src\db\migrations\01_init_schema.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 Get-Content -Raw src\db\migrations\02_anomalies.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 Get-Content -Raw src\db\migrations\03_anomalies_p1_columns.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
+Get-Content -Raw src\db\migrations\04_rules_retention.sql | docker exec -i eventpulse-timescaledb psql -U eventpulse -d eventpulse -v ON_ERROR_STOP=1
 ```
 
 ### 4. Örnek veri (isteğe bağlı)
@@ -153,6 +157,14 @@ Son **15 tam dakika** baseline, son tamamlanmış **1 dakika** hacmi ile karşı
 | [`docs/ai-log.md`](docs/ai-log.md) | Etkileşim günlüğü |
 
 ---
+
+## Bilinen sınırlar (PDF P2 / sonraki sprint)
+
+- **FR-07:** Slack / e-posta bildirimi yok (kanal stub: `alert_rules.channel_hint`).
+- **FR-10 / FR-11 / FR-12:** Auth, replay, CSV/PDF export — tasarlanmış, uygulanmadı.
+- **PDF Appendix A:** Üst seviye `source` / `metadata` / `timestamp` alan adları yerine mevcut `occurred_at` + payload şeması kullanılıyor (`docs/api.md` Appendix A).
+- **Kural motoru:** `alert_rules` satırları saklanır; dinamik DSL değerlendirmesi genişletme adımıdır (Z-score + critical `error` kuralı çalışır).
+- **Test kapsamı:** Anomali + batch şema birim testleri var; %80 satır kapsamı hedefi için ek test önerilir.
 
 ## Lisans
 

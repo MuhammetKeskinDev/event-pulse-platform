@@ -5,6 +5,11 @@ import pg from "pg";
 import pino from "pino";
 
 import { EVENTS_LIVE_CHANNEL } from "../constants/realtime";
+import {
+  CONSUMER_GROUP,
+  EVENTS_DLQ_STREAM,
+  EVENTS_STREAM as STREAM_KEY,
+} from "../constants/streams";
 import { detectAndPersistAnomaly } from "../services/anomaly-detector";
 
 const log = pino({
@@ -12,8 +17,6 @@ const log = pino({
   name: "event-consumer",
 });
 
-const STREAM_KEY = "events_stream";
-const CONSUMER_GROUP = "workers";
 const CONSUMER_NAME =
   process.env.CONSUMER_NAME ?? `event-consumer-${hostname()}-${process.pid}`;
 
@@ -93,6 +96,46 @@ async function persistEvent(
     envelope.occurred_at,
     JSON.stringify(envelope.payload),
   ]);
+}
+
+const PERSIST_MAX_ATTEMPTS = 3;
+
+async function persistOrDlq(
+  redis: Redis,
+  pool: pg.Pool,
+  messageId: string,
+  rawEnvelope: string,
+  envelope: StreamEnvelope,
+): Promise<"persisted" | "dlq"> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
+    try {
+      applyCriticalErrorRule(envelope);
+      await persistEvent(pool, envelope);
+      return "persisted";
+    } catch (err) {
+      lastErr = err;
+      log.warn({ err, messageId, attempt }, "persist_attempt_failed");
+      if (attempt < PERSIST_MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 150 * attempt));
+      }
+    }
+  }
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  log.error({ messageId, msg }, "event_sent_to_dlq_after_retries");
+  await redis.xadd(
+    EVENTS_DLQ_STREAM,
+    "*",
+    "original_message_id",
+    messageId,
+    "envelope",
+    rawEnvelope,
+    "error",
+    msg,
+    "failed_at",
+    new Date().toISOString(),
+  );
+  return "dlq";
 }
 
 async function run(): Promise<void> {
@@ -248,30 +291,57 @@ async function run(): Promise<void> {
         }
 
         try {
-          applyCriticalErrorRule(envelope);
-          await persistEvent(pool, envelope);
-          await redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
-          log.info(
-            { messageId, event_id: envelope.event_id, event_type: envelope.event_type },
-            "event_persisted",
+          const outcome = await persistOrDlq(
+            redis,
+            pool,
+            messageId,
+            raw,
+            envelope,
           );
-          try {
-            await redis.publish(
-              EVENTS_LIVE_CHANNEL,
-              JSON.stringify({
-                type: "event_processed",
+          await redis.xack(STREAM_KEY, CONSUMER_GROUP, messageId);
+          if (outcome === "persisted") {
+            log.info(
+              {
+                messageId,
                 event_id: envelope.event_id,
                 event_type: envelope.event_type,
-                occurred_at: envelope.occurred_at,
-              }),
+              },
+              "event_persisted",
             );
-          } catch (pubErr) {
-            log.warn({ pubErr, event_id: envelope.event_id }, "ws_live_publish_failed");
+            try {
+              await redis.publish(
+                EVENTS_LIVE_CHANNEL,
+                JSON.stringify({
+                  type: "event_processed",
+                  event_id: envelope.event_id,
+                  event_type: envelope.event_type,
+                  occurred_at: envelope.occurred_at,
+                }),
+              );
+            } catch (pubErr) {
+              log.warn(
+                { pubErr, event_id: envelope.event_id },
+                "ws_live_publish_failed",
+              );
+            }
+          } else {
+            try {
+              await redis.publish(
+                EVENTS_LIVE_CHANNEL,
+                JSON.stringify({
+                  type: "event_dlq",
+                  message_id: messageId,
+                  event_id: envelope.event_id,
+                }),
+              );
+            } catch (pubErr) {
+              log.warn({ pubErr, messageId }, "dlq_ws_publish_failed");
+            }
           }
         } catch (err) {
           log.error(
             { err, messageId, event_id: envelope.event_id },
-            "event_processing_failed_no_ack",
+            "event_processing_fatal_after_dlq",
           );
         }
       }

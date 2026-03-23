@@ -3,19 +3,25 @@ import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import postgres from "@fastify/postgres";
 import redis from "@fastify/redis";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
 import websocket from "@fastify/websocket";
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import type Redis from "ioredis";
 import { z } from "zod";
 
 import { EVENTS_LIVE_CHANNEL } from "./constants/realtime";
+import {
+  CONSUMER_GROUP,
+  EVENTS_DLQ_STREAM,
+  EVENTS_STREAM,
+} from "./constants/streams";
+import { batchIngestionSchema } from "./schemas/batch-ingestion";
 import { ingestionEventSchema } from "./schemas/ingestion-events";
 import {
   broadcastToWebSocketClients,
   registerWebSocketClient,
 } from "./realtime/ws-hub";
-
-const EVENTS_STREAM = "events_stream";
 
 const connectionString =
   process.env.DATABASE_URL ??
@@ -33,6 +39,13 @@ const logLevel = (process.env.LOG_LEVEL ?? "info") as
   | "silent";
 
 const METRICS_CACHE_MAX_AGE_SEC = 10;
+
+const createRuleSchema = z.object({
+  name: z.string().min(1).max(200),
+  definition: z.record(z.string(), z.unknown()).optional(),
+  enabled: z.boolean().optional(),
+  channel_hint: z.string().max(200).optional(),
+});
 
 function toBigIntString(value: unknown): bigint {
   if (typeof value === "bigint") {
@@ -55,6 +68,24 @@ function errorRatePercent(errors: bigint, total: bigint): number {
   return Math.round(pct * 100) / 100;
 }
 
+async function enqueueEnvelope(
+  app: FastifyInstance,
+  envelope: {
+    event_id: string;
+    event_type: string;
+    occurred_at: string;
+    payload: unknown;
+    received_at: string;
+  },
+): Promise<void> {
+  await app.redis.xadd(
+    EVENTS_STREAM,
+    "*",
+    "envelope",
+    JSON.stringify(envelope),
+  );
+}
+
 export async function buildServer(options?: { silent?: boolean }) {
   const app = Fastify({
     logger: options?.silent
@@ -72,6 +103,30 @@ export async function buildServer(options?: { silent?: boolean }) {
   });
 
   await app.register(cors, { origin: true });
+
+  await app.register(swagger, {
+    openapi: {
+      openapi: "3.1.0",
+      info: {
+        title: "EventPulse API",
+        description:
+          "NovaMart case study — ingestion, metrics, query, anomalies (PDF v2.0)",
+        version: "1.0.0",
+      },
+      tags: [
+        { name: "ingestion", description: "Event acceptance" },
+        { name: "metrics", description: "Aggregates & throughput series" },
+        { name: "query", description: "Event & anomaly reads" },
+        { name: "rules", description: "Alert rules (stub CRUD)" },
+        { name: "health", description: "Pipeline observability" },
+      ],
+    },
+  });
+
+  await app.register(swaggerUi, {
+    routePrefix: "/docs",
+    uiConfig: { docExpansion: "list", deepLinking: true },
+  });
 
   await app.register(postgres, {
     connectionString,
@@ -119,10 +174,20 @@ export async function buildServer(options?: { silent?: boolean }) {
   app.get("/", async (_request, reply) => {
     return reply.send({
       service: "eventpulse-ingestion-api",
+      openapi: "/docs",
       endpoints: {
-        ingest_events: { method: "POST", path: "/api/v1/events" },
+        ingest_single: { method: "POST", path: "/api/v1/events" },
+        ingest_batch: { method: "POST", path: "/api/v1/events/batch" },
+        pipeline_health: { method: "GET", path: "/api/v1/events/health" },
         metrics: { method: "GET", path: "/api/v1/metrics" },
+        metrics_throughput: {
+          method: "GET",
+          path: "/api/v1/metrics/throughput",
+        },
+        events_query: { method: "GET", path: "/api/v1/events" },
+        event_by_id: { method: "GET", path: "/api/v1/events/:id" },
         anomalies: { method: "GET", path: "/api/v1/anomalies" },
+        rules: { method: "GET,POST", path: "/api/v1/rules" },
         events_stream: {
           protocol: "WebSocket",
           path: "/ws/events",
@@ -130,6 +195,68 @@ export async function buildServer(options?: { silent?: boolean }) {
       },
     });
   });
+
+  app.get(
+    "/api/v1/events/health",
+    {
+      schema: {
+        tags: ["health"],
+        summary: "Pipeline health (queue depth, DB latency)",
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const t0 = Date.now();
+      let db_ok = false;
+      let db_latency_ms = 0;
+      try {
+        await app.pg.query("SELECT 1");
+        db_ok = true;
+        db_latency_ms = Date.now() - t0;
+      } catch (err) {
+        request.log.error({ err }, "health_db_failed");
+      }
+
+      const stream_length = await app.redis.xlen(EVENTS_STREAM);
+      let pending_messages = 0;
+      try {
+        const pend = (await app.redis.xpending(
+          EVENTS_STREAM,
+          CONSUMER_GROUP,
+        )) as [string, string, string, unknown[]] | null;
+        if (pend !== null && pend[0] !== undefined) {
+          pending_messages = Number.parseInt(String(pend[0]), 10) || 0;
+        }
+      } catch {
+        /* group may not exist yet */
+      }
+
+      let dlq_length = 0;
+      try {
+        dlq_length = await app.redis.xlen(EVENTS_DLQ_STREAM);
+      } catch {
+        dlq_length = 0;
+      }
+
+      return reply.send({
+        ok: db_ok,
+        redis: true,
+        stream: EVENTS_STREAM,
+        stream_length,
+        consumer_group: CONSUMER_GROUP,
+        pending_messages,
+        dlq_stream: EVENTS_DLQ_STREAM,
+        dlq_length,
+        db_latency_ms,
+        checked_at: new Date().toISOString(),
+      });
+    },
+  );
 
   app.get("/api/v1/metrics", async (request, reply) => {
     void reply.header(
@@ -214,6 +341,69 @@ export async function buildServer(options?: { silent?: boolean }) {
     }
   });
 
+  app.get("/api/v1/metrics/throughput", async (request, reply) => {
+    void reply.header(
+      "Cache-Control",
+      `public, max-age=${METRICS_CACHE_MAX_AGE_SEC}`,
+    );
+    const q = request.query as { windowMinutes?: string; bucketMinutes?: string };
+    const windowMin = Math.min(
+      24 * 60,
+      Math.max(15, Number.parseInt(q.windowMinutes ?? "60", 10) || 60),
+    );
+    const bucketMin = Math.min(60, Math.max(1, Number.parseInt(q.bucketMinutes ?? "5", 10) || 5));
+
+    try {
+      const rows = await app.pg.query<{
+        bucket_start: Date;
+        event_type: string;
+        c: string;
+      }>(
+        `
+          SELECT
+            to_timestamp(
+              floor(EXTRACT(EPOCH FROM occurred_at) / ($2::float * 60.0))
+              * ($2::float * 60.0)
+            ) AT TIME ZONE 'UTC' AS bucket_start,
+            event_type,
+            COUNT(*)::text AS c
+          FROM events
+          WHERE occurred_at >= NOW() - ($1::int * INTERVAL '1 minute')
+          GROUP BY 1, 2
+          ORDER BY 1 ASC
+        `,
+        [windowMin, bucketMin],
+      );
+
+      const bucketMap = new Map<
+        string,
+        { bucket_start: string; counts: Record<string, number> }
+      >();
+
+      for (const row of rows.rows) {
+        const iso =
+          row.bucket_start instanceof Date
+            ? row.bucket_start.toISOString()
+            : String(row.bucket_start);
+        let b = bucketMap.get(iso);
+        if (!b) {
+          b = { bucket_start: iso, counts: {} };
+          bucketMap.set(iso, b);
+        }
+        b.counts[row.event_type] = Number(row.c);
+      }
+
+      return reply.send({
+        window_minutes: windowMin,
+        bucket_minutes: bucketMin,
+        buckets: [...bucketMap.values()],
+      });
+    } catch (err) {
+      request.log.error({ err }, "throughput_series_failed");
+      return reply.status(503).send({ error: "throughput_unavailable" });
+    }
+  });
+
   app.get("/api/v1/anomalies", async (request, reply) => {
     const raw = (request.query as { limit?: string }).limit;
     const parsed = raw !== undefined ? Number.parseInt(raw, 10) : 10;
@@ -256,10 +446,180 @@ export async function buildServer(options?: { silent?: boolean }) {
     }
   });
 
-  app.setErrorHandler((err, request, reply) => {
-    request.log.error({ err }, "Unhandled error");
-    if (!reply.sent) {
-      void reply.status(500).send({ error: "internal_server_error" });
+  app.get("/api/v1/events", async (request, reply) => {
+    const q = request.query as {
+      event_type?: string;
+      from?: string;
+      to?: string;
+      limit?: string;
+      offset?: string;
+    };
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(q.limit ?? "50", 10) || 50),
+    );
+    const offset = Math.max(0, Number.parseInt(q.offset ?? "0", 10) || 0);
+
+    const params: unknown[] = [];
+    let p = 1;
+    const where: string[] = ["1=1"];
+    if (q.event_type !== undefined && q.event_type.length > 0) {
+      where.push(`event_type = $${p}`);
+      params.push(q.event_type);
+      p += 1;
+    }
+    if (q.from !== undefined && q.from.length > 0) {
+      where.push(`occurred_at >= $${p}::timestamptz`);
+      params.push(q.from);
+      p += 1;
+    }
+    if (q.to !== undefined && q.to.length > 0) {
+      where.push(`occurred_at < $${p}::timestamptz`);
+      params.push(q.to);
+      p += 1;
+    }
+    params.push(limit, offset);
+
+    try {
+      const sql = `
+        SELECT id::text AS id, event_type,
+               occurred_at,
+               payload
+        FROM events
+        WHERE ${where.join(" AND ")}
+        ORDER BY occurred_at DESC
+        LIMIT $${p} OFFSET $${p + 1}
+      `;
+      const result = await app.pg.query<{
+        id: string;
+        event_type: string;
+        occurred_at: Date;
+        payload: unknown;
+      }>(sql, params);
+
+      return reply.send({
+        items: result.rows.map((row) => ({
+          id: row.id,
+          event_type: row.event_type,
+          occurred_at:
+            row.occurred_at instanceof Date
+              ? row.occurred_at.toISOString()
+              : String(row.occurred_at),
+          payload: row.payload,
+        })),
+        limit,
+        offset,
+      });
+    } catch (err) {
+      request.log.error({ err }, "events_query_failed");
+      return reply.status(503).send({ error: "events_unavailable" });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/v1/events/:id", async (request, reply) => {
+    const id = request.params.id;
+    if (!/^[0-9a-f-]{36}$/i.test(id)) {
+      return reply.status(400).send({ error: "invalid_event_id" });
+    }
+    try {
+      const result = await app.pg.query<{
+        id: string;
+        event_type: string;
+        occurred_at: Date;
+        payload: unknown;
+      }>(
+        `
+          SELECT id::text AS id, event_type, occurred_at, payload
+          FROM events
+          WHERE id = $1::uuid
+          ORDER BY occurred_at DESC
+          LIMIT 1
+        `,
+        [id],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return reply.status(404).send({ error: "event_not_found" });
+      }
+      return reply.send({
+        id: row.id,
+        event_type: row.event_type,
+        occurred_at:
+          row.occurred_at instanceof Date
+            ? row.occurred_at.toISOString()
+            : String(row.occurred_at),
+        payload: row.payload,
+      });
+    } catch (err) {
+      request.log.error({ err }, "event_by_id_failed");
+      return reply.status(503).send({ error: "events_unavailable" });
+    }
+  });
+
+  app.get("/api/v1/rules", async (request, reply) => {
+    try {
+      const result = await app.pg.query<{
+        id: string;
+        name: string;
+        definition: unknown;
+        enabled: boolean;
+        channel_hint: string | null;
+        created_at: Date;
+      }>(
+        `
+          SELECT id, name, definition, enabled, channel_hint, created_at
+          FROM alert_rules
+          ORDER BY created_at DESC
+          LIMIT 200
+        `,
+      );
+      return reply.send({
+        items: result.rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          definition: r.definition,
+          enabled: r.enabled,
+          channel_hint: r.channel_hint,
+          created_at:
+            r.created_at instanceof Date
+              ? r.created_at.toISOString()
+              : String(r.created_at),
+        })),
+      });
+    } catch (err) {
+      request.log.error({ err }, "rules_list_failed");
+      return reply.status(503).send({ error: "rules_unavailable" });
+    }
+  });
+
+  app.post("/api/v1/rules", async (request, reply) => {
+    const parsed = createRuleSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(422).send({
+        error: "validation_failed",
+        details: z.treeifyError(parsed.error),
+      });
+    }
+    const b = parsed.data;
+    try {
+      const ins = await app.pg.query<{ id: string }>(
+        `
+          INSERT INTO alert_rules (name, definition, enabled, channel_hint)
+          VALUES ($1, $2::jsonb, COALESCE($3, true), $4)
+          RETURNING id::text AS id
+        `,
+        [
+          b.name,
+          JSON.stringify(b.definition ?? {}),
+          b.enabled ?? true,
+          b.channel_hint ?? null,
+        ],
+      );
+      const id = ins.rows[0]?.id;
+      return reply.status(201).send({ id, status: "created" });
+    } catch (err) {
+      request.log.error({ err }, "rules_create_failed");
+      return reply.status(503).send({ error: "rules_unavailable" });
     }
   });
 
@@ -267,7 +627,7 @@ export async function buildServer(options?: { silent?: boolean }) {
     const parsed = ingestionEventSchema.safeParse(request.body);
 
     if (!parsed.success) {
-      return reply.status(400).send({
+      return reply.status(422).send({
         error: "validation_failed",
         details: z.treeifyError(parsed.error),
       });
@@ -285,12 +645,7 @@ export async function buildServer(options?: { silent?: boolean }) {
     };
 
     try {
-      await app.redis.xadd(
-        EVENTS_STREAM,
-        "*",
-        "envelope",
-        JSON.stringify(envelope),
-      );
+      await enqueueEnvelope(app, envelope);
     } catch (err) {
       request.log.error({ err }, "redis_xadd_failed");
       return reply.status(503).send({ error: "stream_unavailable" });
@@ -305,6 +660,50 @@ export async function buildServer(options?: { silent?: boolean }) {
       status: "accepted",
       event_id: eventId,
     });
+  });
+
+  app.post("/api/v1/events/batch", async (request, reply) => {
+    const parsed = batchIngestionSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(422).send({
+        error: "validation_failed",
+        details: z.treeifyError(parsed.error),
+      });
+    }
+
+    const event_ids: string[] = [];
+    try {
+      for (const ev of parsed.data.events) {
+        const eventId = ev.event_id ?? randomUUID();
+        event_ids.push(eventId);
+        const envelope = {
+          event_id: eventId,
+          event_type: ev.event_type,
+          occurred_at: ev.occurred_at,
+          payload: ev.payload,
+          received_at: new Date().toISOString(),
+        };
+        await enqueueEnvelope(app, envelope);
+      }
+    } catch (err) {
+      request.log.error({ err }, "redis_batch_xadd_failed");
+      return reply.status(503).send({ error: "stream_unavailable" });
+    }
+
+    request.log.info({ count: event_ids.length }, "batch_accepted");
+
+    return reply.status(202).send({
+      status: "accepted",
+      count: event_ids.length,
+      event_ids,
+    });
+  });
+
+  app.setErrorHandler((err, request, reply) => {
+    request.log.error({ err }, "Unhandled error");
+    if (!reply.sent) {
+      void reply.status(500).send({ error: "internal_server_error" });
+    }
   });
 
   return app;

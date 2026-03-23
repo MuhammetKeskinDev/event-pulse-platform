@@ -1,16 +1,29 @@
 # EventPulse — API Özeti
 
+## OpenAPI / Swagger (PDF)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|----------|
+| `GET` | `/docs` | Swagger UI (`@fastify/swagger-ui`). |
+
 ## Genel
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `GET` | `/` | Servis özeti ve ingestion uç noktası bilgisi (**200**). |
+| `GET` | `/` | Servis özeti, `/docs` ve HTTP uç listesi (**200**). |
+
+## Pipeline health (PDF §3.1)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|----------|
+| `GET` | `/api/v1/events/health` | `stream_length`, `pending_messages`, `dlq_length`, `db_latency_ms` (**200**). |
 
 ## Metrics (dashboard)
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
 | `GET` | `/api/v1/metrics` | TimescaleDB `events` tablosundan metrikler (**200**). Önbellek: `Cache-Control: public, max-age=10` (panelde ~10 sn’de bir yenileme için uygundur). |
+| `GET` | `/api/v1/metrics/throughput` | Son pencerede **event_type** kırılımlı kova sayıları (PDF throughput grafiği). Sorgu: `windowMinutes` (varsayılan 60, max 1440), `bucketMinutes` (varsayılan 5, max 60). |
 
 ### Yanıt özeti
 
@@ -46,7 +59,25 @@
 }
 ```
 
-Dashboard bu mesajı alınca `GET /api/v1/metrics` ve `GET /api/v1/anomalies` ile paneli yeniler.
+Dashboard bu mesajı alınca metrik, anomali, sağlık, throughput kovaları ve son olayları yeniler. Ek WS türü:
+
+```json
+{ "type": "event_dlq", "message_id": "…", "event_id": "…" }
+```
+
+## Events — sorgu (PDF FR-08)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|--------|
+| `GET` | `/api/v1/events` | Filtre: `event_type`, `from`, `to` (ISO-8601), `limit` (1–100, varsayılan 50), `offset`. Yanıt: `{ items, limit, offset }`. |
+| `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). |
+
+## Rules — stub (PDF FR-04 / FR-08)
+
+| Yöntem | Yol | Açıklama |
+|--------|-----|--------|
+| `GET` | `/api/v1/rules` | `alert_rules` tablosu (migrasyon `04_rules_retention.sql` gerekir). |
+| `POST` | `/api/v1/rules` | `{ "name", "definition"?, "enabled"?, "channel_hint"? }` — **201**. Değerlendirme motoru aşamalı genişletme. |
 
 ## Anomalies (FR-09 P1)
 
@@ -80,9 +111,10 @@ Worker, `detectAndPersistAnomaly` çağrısından sonra kritik kayıt oluşursa 
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `POST` | `/api/v1/events` | Olay kabulü; doğrulama sonrası Redis Stream `events_stream` üzerine yazar, **202 Accepted** döner. |
+| `POST` | `/api/v1/events` | Tekil olay; doğrulama sonrası stream’e yazar, **202**. Geçersiz gövde: **422**. |
+| `POST` | `/api/v1/events/batch` | `{ "events": [ … ] }` — en fazla **500** olay (PDF FR-01). **202** + `count`, `event_ids`. |
 
-### Yanıt (202 Accepted)
+### Yanıt (202) — tekil
 
 ```json
 {
@@ -93,11 +125,21 @@ Worker, `detectAndPersistAnomaly` çağrısından sonra kritik kayıt oluşursa 
 
 `event_id` istek gövdesinde verilmediyse sunucu UUID üretir.
 
+### Yanıt (202) — batch
+
+```json
+{
+  "status": "accepted",
+  "count": 10,
+  "event_ids": ["…"]
+}
+```
+
 ### Hatalar
 
 | HTTP | Gövde | Açıklama |
 |------|--------|----------|
-| 400 | `validation_failed` + `details` | Zod şemasına uymayan gövde |
+| 422 | `validation_failed` + `details` | Zod şemasına uymayan gövde |
 | 503 | `stream_unavailable` | Redis `XADD` başarısız |
 
 ---
