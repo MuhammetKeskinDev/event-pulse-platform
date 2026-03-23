@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 7 |
+| **Total AI interactions logged** | 8 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~185 minutes |
+| **Estimated time saved** | ~215 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -139,6 +139,24 @@
 **Validation:** `npm run build` (frontend) başarılı.
 
 **Quality:** 5/5 — Metrik API ile hizalı P0 dashboard iskeleti.
+
+**Time Impact:** Saved ~30 minutes.
+
+### AI-008 | 2026-03-23 17:45 PM | Cursor
+
+**Category:** Anomaly detection (FR-09)
+
+**Context:** Dakika bazlı hacim: son 15 tam dakikanın (değerlendirilen dakika hariç) sayımları üzerinden örneklem ortalaması ve standart sapma; son tamamlanmış 1 dakikanın hacmi 3σ dışındaysa `anomalies` tablosuna yazım.
+
+**Prompt:** `src/services/anomaly-detector.ts`, `anomalies` (timestamp benzeri `detected_at`, severity, description), AI-008 günlük kaydı.
+
+**AI Output Summary:** `02_anomalies.sql` migrasyonu; `detectAndPersistAnomaly(pool)` — sıfırla doldurulmuş 15 dakikalık baseline serisi, `std=0` için ortalamadan sapma kuralı, tespitte `INSERT` + JSON `description`; `BASELINE_MINUTES` / `SIGMA_THRESHOLD` sabitleri.
+
+**Your Modifications:** —
+
+**Validation:** `npx tsc --noEmit`; migrasyon konteynerde uygulandı.
+
+**Quality:** 5/5 — Zaman serisi tabanına uygun basit 3σ dakika kuralı.
 
 **Time Impact:** Saved ~30 minutes.
 
