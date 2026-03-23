@@ -16,7 +16,8 @@ export interface AnomalyDetectionResult {
   readonly persisted: boolean;
 }
 
-function sampleStdDev(values: readonly number[]): number {
+/** Örneklem standart sapması (n < 2 için 0). Birim testlerde kullanılır. */
+export function sampleStdDev(values: readonly number[]): number {
   const n = values.length;
   if (n < 2) {
     return 0;
@@ -27,8 +28,8 @@ function sampleStdDev(values: readonly number[]): number {
   return Math.sqrt(variance);
 }
 
-/** Örneklem standart sapmasına göre Z-skoru (sapma / σ). */
-function zScoreDistance(
+/** Örneklem standart sapmasına göre Z-skoru (sapma / σ). Birim testlerde kullanılır. */
+export function zScoreDistance(
   evalCount: number,
   mean: number,
   stdDev: number,
@@ -45,6 +46,29 @@ function zScoreDistance(
     anomaly: sigmaDistance > SIGMA_THRESHOLD,
     sigmaDistance,
   };
+}
+
+/**
+ * Dakika bazlı baseline sayıları ve değerlendirme dakikası hacmi ile Z-skor kararı.
+ * `detectAndPersistAnomaly` ile aynı ortalama / σ / 3σ eşiği.
+ */
+export function computeVolumeZScoreDecision(
+  evalCount: number,
+  baselineMinuteCounts: readonly number[],
+): {
+  anomaly: boolean;
+  mean: number;
+  stdDev: number;
+  sigmaDistance: number;
+} {
+  const mean =
+    baselineMinuteCounts.length > 0
+      ? baselineMinuteCounts.reduce((a, b) => a + b, 0) /
+        baselineMinuteCounts.length
+      : 0;
+  const stdDev = sampleStdDev(baselineMinuteCounts);
+  const { anomaly, sigmaDistance } = zScoreDistance(evalCount, mean, stdDev);
+  return { anomaly, mean, stdDev, sigmaDistance };
 }
 
 /**
@@ -97,11 +121,6 @@ export async function detectAndPersistAnomaly(
     );
 
     const baselineCounts = baseline.rows.map((row) => Number(row.c));
-    const mean =
-      baselineCounts.length > 0
-        ? baselineCounts.reduce((a, b) => a + b, 0) / baselineCounts.length
-        : 0;
-    const stdDev = sampleStdDev(baselineCounts);
 
     const evalCountRes = await client.query<{ c: string }>(
       `
@@ -114,7 +133,8 @@ export async function detectAndPersistAnomaly(
     );
     const evalCount = Number(evalCountRes.rows[0]?.c ?? 0);
 
-    const { anomaly, sigmaDistance } = zScoreDistance(evalCount, mean, stdDev);
+    const { anomaly, mean, stdDev, sigmaDistance } =
+      computeVolumeZScoreDecision(evalCount, baselineCounts);
 
     let persisted = false;
     if (anomaly) {

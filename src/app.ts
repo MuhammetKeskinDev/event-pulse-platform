@@ -55,15 +55,17 @@ function errorRatePercent(errors: bigint, total: bigint): number {
   return Math.round(pct * 100) / 100;
 }
 
-async function buildServer() {
+export async function buildServer(options?: { silent?: boolean }) {
   const app = Fastify({
-    logger: {
-      level: logLevel,
-      redact: {
-        paths: ["req.headers.authorization", "req.headers.cookie"],
-        remove: true,
-      },
-    },
+    logger: options?.silent
+      ? false
+      : {
+          level: logLevel,
+          redact: {
+            paths: ["req.headers.authorization", "req.headers.cookie"],
+            remove: true,
+          },
+        },
     disableRequestLogging: false,
     requestIdHeader: "x-request-id",
     genReqId: () => randomUUID(),
