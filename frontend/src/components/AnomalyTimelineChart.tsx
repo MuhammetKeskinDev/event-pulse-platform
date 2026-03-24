@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { CSSProperties } from 'react'
 import {
   CartesianGrid,
   ResponsiveContainer,
@@ -10,10 +11,68 @@ import {
   ZAxis,
 } from 'recharts'
 
+import { parseExemplarEventId } from '../lib/anomaly-description'
 import type { AnomalyRow } from '../types/anomaly'
 
 interface Props {
   items: AnomalyRow[]
+  onViewEventId?: (id: string) => void
+}
+
+type ScatterTooltipDatum = {
+  x?: number
+  severity?: string
+  event_type?: string
+  exemplar_event_id?: string | null
+}
+
+/** Scatter + ZAxis için Recharts her eksen (X/Y/Z) ayrı tooltip satırı üretir; tek blok gösteriyoruz. */
+function AnomalyScatterTooltipContent({
+  active,
+  payload,
+  label,
+  contentStyle,
+}: {
+  active?: boolean
+  payload?: ReadonlyArray<{ payload?: ScatterTooltipDatum }>
+  label?: string | number
+  contentStyle?: CSSProperties
+}) {
+  if (!active || !payload?.length) {
+    return null
+  }
+  const datum = payload[0]?.payload
+  if (!datum) {
+    return null
+  }
+  const timeMs =
+    typeof label === 'number'
+      ? label
+      : typeof datum.x === 'number'
+        ? datum.x
+        : NaN
+  const timeStr = Number.isFinite(timeMs)
+    ? new Date(timeMs).toLocaleString()
+    : '—'
+  const parts = [
+    `severity: ${datum.severity ?? ''}`,
+    `event_type: ${datum.event_type ?? ''}`,
+  ]
+  if (datum.exemplar_event_id) {
+    parts.push('linked event: click for detail')
+  }
+  return (
+    <div
+      className="rounded-lg border border-slate-600 px-3 py-2 text-xs text-rose-100"
+      style={{
+        background: '#0f172a',
+        ...contentStyle,
+      }}
+    >
+      <p className="mb-1 font-medium text-slate-300">{timeStr}</p>
+      <p>{parts.join(' · ')}</p>
+    </div>
+  )
 }
 
 function severityRank(s: string): number {
@@ -33,7 +92,7 @@ function severityRank(s: string): number {
   return 2
 }
 
-export function AnomalyTimelineChart({ items }: Props) {
+export function AnomalyTimelineChart({ items, onViewEventId }: Props) {
   const data = useMemo(
     () =>
       items.map((a) => ({
@@ -41,6 +100,8 @@ export function AnomalyTimelineChart({ items }: Props) {
         x: new Date(a.detected_at).getTime(),
         y: severityRank(a.severity),
         severity: a.severity,
+        event_type: a.event_type,
+        exemplar_event_id: parseExemplarEventId(a.description),
       })),
     [items],
   )
@@ -56,6 +117,9 @@ export function AnomalyTimelineChart({ items }: Props) {
       </h2>
       <p className="mb-4 text-left text-xs text-slate-600">
         Severity vs detection time (Y: low→critical).
+        {onViewEventId
+          ? ' Click a point to open the related sample event in the detail modal when available.'
+          : null}
       </p>
       <div className="h-[220px] w-full">
         <ResponsiveContainer width="100%" height="100%">
@@ -90,17 +154,42 @@ export function AnomalyTimelineChart({ items }: Props) {
             <Tooltip
               cursor={{ strokeDasharray: '3 3' }}
               contentStyle={{
-                background: '#0f172a',
-                border: '1px solid #334155',
-                borderRadius: 8,
+                background: 'transparent',
+                border: 'none',
+                boxShadow: 'none',
+                padding: 0,
               }}
-              formatter={(_v, _n, props) => {
-                const p = props?.payload as { severity?: string } | undefined
-                return [p?.severity ?? '', 'severity']
-              }}
-              labelFormatter={(v) => new Date(v as number).toLocaleString()}
+              content={AnomalyScatterTooltipContent}
             />
-            <Scatter data={data} fill="#fb7185" isAnimationActive={false} />
+            <Scatter
+              data={data}
+              fill="#fb7185"
+              isAnimationActive={false}
+              className={
+                onViewEventId
+                  ? '[&_.recharts-scatter-symbol]:cursor-pointer'
+                  : undefined
+              }
+              onClick={
+                onViewEventId
+                  ? (dot) => {
+                      const p = dot as {
+                        exemplar_event_id?: string | null
+                        payload?: { exemplar_event_id?: string | null }
+                      }
+                      const eid =
+                        typeof p.exemplar_event_id === 'string'
+                          ? p.exemplar_event_id
+                          : typeof p.payload?.exemplar_event_id === 'string'
+                            ? p.payload.exemplar_event_id
+                            : null
+                      if (eid && eid.length > 0) {
+                        onViewEventId(eid)
+                      }
+                    }
+                  : undefined
+              }
+            />
           </ScatterChart>
         </ResponsiveContainer>
       </div>

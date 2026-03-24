@@ -1,5 +1,6 @@
 /**
  * Ingestion yük üretici: dökümandaki ~100 event/s hedefini doğrulamak için kullanılır.
+ * PDF §6.1: `tests/load/` altında yük script’i.
  *
  * Ortam değişkenleri:
  * - API_BASE — örn. http://127.0.0.1:3000 (sonunda / olmadan)
@@ -11,7 +12,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { ingestionEventSchema } from "../src/schemas/ingestion-events";
+import { ingestionEventSchema } from "../../src/schemas/ingestion-events";
 
 const API_BASE = (process.env.API_BASE ?? "http://127.0.0.1:3000").replace(
   /\/$/,

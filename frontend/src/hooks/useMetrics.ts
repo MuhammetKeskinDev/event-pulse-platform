@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import type { ActiveAlertRow } from '../types/active-alert'
 import type { AnomalyRow } from '../types/anomaly'
 import type {
   LiveEventRow,
@@ -204,6 +205,11 @@ export function useMetrics() {
   const [loading, setLoading] = useState(true)
   const [pollIntervalSeconds, setPollIntervalSeconds] = useState(10)
   const [wsState, setWsState] = useState<WsConnectionState>('connecting')
+  const [activeAlerts, setActiveAlerts] = useState<ActiveAlertRow[]>([])
+
+  const clearActiveAlerts = useCallback(() => {
+    setActiveAlerts([])
+  }, [])
 
   const pushToast = useCallback((text: string) => {
     const id = Date.now() + Math.random()
@@ -401,6 +407,8 @@ export function useMetrics() {
             message?: string
             rule_name?: string
             rule_id?: string
+            severity?: string
+            event_id?: string
           }
           if (msg.type === 'event_processed' && msg.event_type) {
             pushToast(`Processed: ${msg.event_type}`)
@@ -414,6 +422,22 @@ export function useMetrics() {
                 ? msg.message
                 : `Rule fired: ${msg.rule_name ?? msg.rule_id ?? 'unknown'}`
             pushToast(line)
+            const rid = msg.rule_id ?? 'unknown'
+            const eid = msg.event_id ?? ''
+            setActiveAlerts((prev) => {
+              const row: ActiveAlertRow = {
+                id: `${rid}-${eid}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                rule_id: rid,
+                rule_name: msg.rule_name ?? '',
+                severity:
+                  typeof msg.severity === 'string' ? msg.severity : 'warning',
+                message: line,
+                event_id: eid,
+                event_type: msg.event_type,
+                received_at: new Date().toISOString(),
+              }
+              return [row, ...prev].slice(0, 50)
+            })
           }
         } catch {
           /* non-json */
@@ -509,5 +533,7 @@ export function useMetrics() {
     setSeverityFilter,
     transport: 'websocket' as const,
     dashboardWindowIso,
+    activeAlerts,
+    clearActiveAlerts,
   }
 }

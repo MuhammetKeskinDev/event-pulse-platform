@@ -32,7 +32,11 @@ export function registerRootRoute(app: FastifyInstance): void {
           },
           event_by_id: { method: "GET", path: "/api/v1/events/:id" },
           anomalies: { method: "GET", path: "/api/v1/anomalies" },
-          rules: { method: "GET,POST", path: "/api/v1/rules" },
+          rules: {
+            method: "GET,POST,PUT,DELETE",
+            path: "/api/v1/rules",
+            rule_by_id: { method: "GET,PUT,DELETE", path: "/api/v1/rules/:id" },
+          },
           events_stream: {
             protocol: "WebSocket",
             path: "/ws/events",

@@ -150,6 +150,14 @@ export function registerMetricsRoutes(app: FastifyInstance): void {
           "metrics_served",
         );
 
+        /** PDF §3.5 — percentiles alanı; gerçek APM bağlanana kadar tasarım hedefiyle uyumlu stub. */
+        const latencyStub = {
+          p95_ms: 165,
+          p99_ms: 210,
+          scope: "ingestion_api_response",
+          source: "design_stub_until_apm",
+        };
+
         return reply.send({
           refreshed_at: now.toISOString(),
           suggested_poll_interval_seconds: METRICS_CACHE_MAX_AGE_SEC,
@@ -169,6 +177,7 @@ export function registerMetricsRoutes(app: FastifyInstance): void {
             error_events: Number(allErrors),
             error_rate_percent: errorRatePercent(allErrors, allTotal),
           },
+          latency_ms_percentiles: latencyStub,
         });
       } catch (err) {
         request.log.error({ err }, "metrics_query_failed");

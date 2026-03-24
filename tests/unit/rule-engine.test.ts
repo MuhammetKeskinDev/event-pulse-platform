@@ -4,6 +4,7 @@ import { evaluateAlertRulesUseCase } from "@src/application/use-cases/evaluate-a
 import type {
   AlertRuleRepository,
   AlertRuleRow,
+  EmailNotificationStub,
   EventWindowCounter,
   RuleTriggeredPublisher,
   SlackOutbound,
@@ -117,6 +118,10 @@ describe("resolveSlackWebhookUrl", () => {
   });
 });
 
+const noopEmailStub: EmailNotificationStub = {
+  logDelivery: vi.fn(),
+};
+
 describe("evaluateAlertRulesUseCase", () => {
   let cooldown: RuleCooldownTracker;
   const log = {
@@ -127,6 +132,7 @@ describe("evaluateAlertRulesUseCase", () => {
 
   beforeEach(() => {
     cooldown = new RuleCooldownTracker();
+    vi.mocked(noopEmailStub.logDelivery).mockClear();
   });
 
   it("count_threshold tetiklenince publish ve slack çağrılır", async () => {
@@ -155,7 +161,7 @@ describe("evaluateAlertRulesUseCase", () => {
     const slack: SlackOutbound = { postJson };
 
     await evaluateAlertRulesUseCase(
-      { rules, counter, publisher, slack, cooldown },
+      { rules, counter, publisher, slack, emailStub: noopEmailStub, cooldown },
       envelope,
       log as never,
     );
@@ -194,12 +200,26 @@ describe("evaluateAlertRulesUseCase", () => {
     };
 
     await evaluateAlertRulesUseCase(
-      { rules, counter, publisher: { publish }, slack, cooldown },
+      {
+        rules,
+        counter,
+        publisher: { publish },
+        slack,
+        emailStub: noopEmailStub,
+        cooldown,
+      },
       envelope,
       log as never,
     );
     await evaluateAlertRulesUseCase(
-      { rules, counter, publisher: { publish }, slack, cooldown },
+      {
+        rules,
+        counter,
+        publisher: { publish },
+        slack,
+        emailStub: noopEmailStub,
+        cooldown,
+      },
       envelope,
       log as never,
     );
@@ -228,6 +248,7 @@ describe("evaluateAlertRulesUseCase", () => {
         counter: { countInWindow: async () => 3 },
         publisher: { publish },
         slack: { postJson: vi.fn(async () => ({ ok: true })) },
+        emailStub: noopEmailStub,
         cooldown,
       },
       envelope,
@@ -252,11 +273,42 @@ describe("evaluateAlertRulesUseCase", () => {
         counter: { countInWindow: async () => 0 },
         publisher: { publish: vi.fn(async () => {}) },
         slack: { postJson },
+        emailStub: noopEmailStub,
         cooldown,
       },
       envelope,
       log as never,
     );
     expect(postJson).toHaveBeenCalled();
+  });
+
+  it("channel_hint email_stub ise emailStub.logDelivery çağrılır", async () => {
+    const logDelivery = vi.fn();
+    const emailStub: EmailNotificationStub = { logDelivery };
+    const rule: AlertRuleRow = {
+      id: "r-mail",
+      name: "mail-rule",
+      definition: {
+        condition: { kind: "event_match", event_types: ["error"] },
+      },
+      channel_hint: "email_stub",
+    };
+    await evaluateAlertRulesUseCase(
+      {
+        rules: { loadEnabledRules: async () => [rule] },
+        counter: { countInWindow: async () => 0 },
+        publisher: { publish: vi.fn(async () => {}) },
+        slack: { postJson: vi.fn(async () => ({ ok: true })) },
+        emailStub,
+        cooldown,
+      },
+      envelope,
+      log as never,
+    );
+    expect(logDelivery).toHaveBeenCalledTimes(1);
+    expect(logDelivery.mock.calls[0]![1]).toMatchObject({
+      ruleId: "r-mail",
+      channelHint: "email_stub",
+    });
   });
 });

@@ -9,6 +9,7 @@ import { PgCachedAlertRuleRepository } from "../infrastructure/alert-rules/pg-ca
 import { PgEventWindowCounter } from "../infrastructure/alert-rules/pg-event-window-counter";
 import { RedisRuleTriggeredPublisher } from "../infrastructure/alert-rules/redis-rule-triggered-publisher";
 import { FetchSlackOutbound } from "../infrastructure/alert-rules/fetch-slack-outbound";
+import { LoggingEmailNotificationStub } from "../infrastructure/alert-rules/logging-email-notification-stub";
 
 export type { StreamEnvelope } from "../domain/events/stream-envelope";
 
@@ -22,12 +23,14 @@ export async function evaluateAlertRules(
   const counter = new PgEventWindowCounter(pool);
   const publisher = new RedisRuleTriggeredPublisher(redis);
   const slack = new FetchSlackOutbound();
+  const emailStub = new LoggingEmailNotificationStub();
   await evaluateAlertRulesUseCase(
     {
       rules,
       counter,
       publisher,
       slack,
+      emailStub,
       cooldown: ruleEngineCooldown,
     },
     envelope,

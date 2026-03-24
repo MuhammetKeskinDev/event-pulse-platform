@@ -1,22 +1,11 @@
 import { AlertOctagon } from 'lucide-react'
 
+import { parseExemplarEventId } from '../lib/anomaly-description'
 import type { AnomalyRow } from '../types/anomaly'
 
 interface Props {
   items: AnomalyRow[]
   onViewEventId?: (id: string) => void
-}
-
-function parseExemplarEventId(description: string): string | null {
-  try {
-    const o = JSON.parse(description) as { exemplar_event_id?: string }
-    return typeof o.exemplar_event_id === 'string' &&
-      o.exemplar_event_id.length > 0
-      ? o.exemplar_event_id
-      : null
-  } catch {
-    return null
-  }
 }
 
 function formatDescriptionCell(description: string): string {
@@ -83,6 +72,15 @@ export function RecentAnomalies({ items, onViewEventId }: Props) {
         filtrelenir; toplu hacim anomalileri{' '}
         <span className="font-mono text-slate-500">*</span> seçili türde de
         gösterilir. En fazla 500 kayıt.
+        {onViewEventId ? (
+          <>
+            {' '}
+            <strong className="font-medium text-slate-500">
+              İlişkili örnek olayı olan satıra tıklayın
+            </strong>{' '}
+            — olay detayı açılır.
+          </>
+        ) : null}
       </p>
       {items.length === 0 ? (
         <p className="text-sm text-slate-500">No anomalies recorded yet.</p>
@@ -111,10 +109,41 @@ export function RecentAnomalies({ items, onViewEventId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {items.map((row) => (
+              {items.map((row) => {
+                const exemplarId = onViewEventId
+                  ? parseExemplarEventId(row.description)
+                  : null
+                const rowOpensDetail = Boolean(exemplarId && onViewEventId)
+                return (
                 <tr
                   key={row.id}
-                  className="border-b border-slate-800/80 last:border-0"
+                  tabIndex={rowOpensDetail ? 0 : undefined}
+                  role={rowOpensDetail ? 'button' : undefined}
+                  aria-label={
+                    rowOpensDetail
+                      ? 'Open related event detail'
+                      : undefined
+                  }
+                  onClick={
+                    rowOpensDetail && exemplarId && onViewEventId
+                      ? () => onViewEventId(exemplarId)
+                      : undefined
+                  }
+                  onKeyDown={
+                    rowOpensDetail && exemplarId && onViewEventId
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            onViewEventId(exemplarId)
+                          }
+                        }
+                      : undefined
+                  }
+                  className={`border-b border-slate-800/80 last:border-0 ${
+                    rowOpensDetail
+                      ? 'cursor-pointer hover:bg-slate-800/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-500/60'
+                      : ''
+                  }`}
                 >
                   <td className="whitespace-nowrap py-3 pr-4 align-top text-slate-300">
                     <time dateTime={row.detected_at}>
@@ -145,7 +174,10 @@ export function RecentAnomalies({ items, onViewEventId }: Props) {
                           <button
                             type="button"
                             className="text-xs font-mono text-sky-400 underline decoration-sky-400/40 hover:text-sky-300"
-                            onClick={() => onViewEventId(eid)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onViewEventId(eid)
+                            }}
                           >
                             {eid.slice(0, 8)}…
                           </button>
@@ -156,7 +188,8 @@ export function RecentAnomalies({ items, onViewEventId }: Props) {
                     </td>
                   ) : null}
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -7,8 +7,9 @@
     "test:integration": "cross-env RUN_INTEGRATION=1 vitest run tests/integration",
     "test:all": "vitest run",
     "verify:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/full-verify.ps1",
-    "load-gen": "tsx scripts/load-gen.ts",
-    "seed-db": "tsx scripts/seed-db.ts"
+    "load-gen": "tsx tests/load/load-gen.ts",
+    "seed-db": "tsx scripts/seed-db.ts",
+    "trigger-rule-alert": "tsx scripts/trigger-rule-alert.ts"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5",

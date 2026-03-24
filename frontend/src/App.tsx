@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Activity, Download, Loader2, Radio } from 'lucide-react'
 
+import { ActiveAlertsPanel } from './components/ActiveAlertsPanel'
 import { AnomalyTimelineChart } from './components/AnomalyTimelineChart'
 import { ErrorRateGauge } from './components/ErrorRateGauge'
 import { EventDetailModal } from './components/EventDetailModal'
@@ -29,6 +30,7 @@ const WINDOW_LABEL: Record<DashboardWindowPreset, string> = {
 function App() {
   const [detailEventId, setDetailEventId] = useState<string | null>(null)
   const [exportFormat, setExportFormat] = useState<'csv' | 'pdf'>('csv')
+  const [exportRowLimit, setExportRowLimit] = useState(5000)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const {
@@ -56,6 +58,8 @@ function App() {
     severityFilter,
     setSeverityFilter,
     dashboardWindowIso,
+    activeAlerts,
+    clearActiveAlerts,
   } = useMetrics()
 
   const rangeDescription = useMemo(() => {
@@ -100,7 +104,7 @@ function App() {
         {
           eventType: eventTypeFilter || undefined,
           source: sourceFilter || undefined,
-          limit: 5000,
+          limit: Math.min(10_000, Math.max(1, Math.round(exportRowLimit))),
         },
       )
       const res = await fetch(url)
@@ -117,18 +121,25 @@ function App() {
         throw new Error(msg)
       }
       const blob = await res.blob()
+      if (blob.size === 0) {
+        throw new Error('empty_export_response')
+      }
       const cd = res.headers.get('Content-Disposition')
       let filename = `events-export.${exportFormat}`
       const m = cd?.match(/filename="([^"]+)"/)
       if (m?.[1]) {
         filename = m[1]
       }
+      const objectUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
+      a.href = objectUrl
       a.download = filename
       a.rel = 'noopener'
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(a.href)
+      document.body.removeChild(a)
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2_000)
     } catch (e) {
       setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
@@ -189,7 +200,7 @@ function App() {
           </div>
         ) : null}
 
-        <div className="mb-6 flex flex-wrap items-end gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-4">
+        <div className="mb-6 flex flex-wrap items-start gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-4">
           <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
             Time range
             <select
@@ -296,10 +307,10 @@ function App() {
             </select>
           </label>
           <div className="flex min-w-[12rem] flex-col gap-1 text-left text-xs text-slate-400">
-            <span>Export reports (FR-12)</span>
+            Export reports (FR-12)
             <div className="flex flex-wrap items-center gap-2">
               <select
-                className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
                 value={exportFormat}
                 onChange={(e) =>
                   setExportFormat(e.target.value as 'csv' | 'pdf')
@@ -309,11 +320,32 @@ function App() {
                 <option value="csv">CSV</option>
                 <option value="pdf">PDF</option>
               </select>
+              <label className="flex items-center gap-1.5 text-slate-500">
+                <span className="sr-only">Row limit</span>
+                <span className="whitespace-nowrap text-[10px] uppercase tracking-wide">
+                  Max rows
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={exportRowLimit}
+                  onChange={(e) => {
+                    const v = Number.parseInt(e.target.value, 10)
+                    if (!Number.isFinite(v)) {
+                      return
+                    }
+                    setExportRowLimit(Math.min(10_000, Math.max(1, v)))
+                  }}
+                  className="w-[4.5rem] rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-center font-mono text-sm text-slate-100"
+                  aria-label="Export row limit"
+                />
+              </label>
               <button
                 type="button"
                 disabled={exportBusy}
                 onClick={() => void runExport()}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-sky-700/60 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-200 hover:bg-sky-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-[42px] shrink-0 items-center gap-1.5 rounded-lg border border-sky-700/60 bg-sky-950/50 px-3 text-sm font-medium text-sky-200 hover:bg-sky-900/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {exportBusy ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -325,7 +357,7 @@ function App() {
             </div>
             <p className="text-[10px] leading-snug text-slate-600">
               Uses dashboard time range + event type + source (not severity).
-              Max 5000 rows.
+              API cap 1–10000 rows.
             </p>
             {exportError ? (
               <p className="text-[11px] text-red-300" role="alert">
@@ -339,8 +371,8 @@ function App() {
           <SystemHealthPanel health={health} />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20 lg:col-span-2">
+        <div className="mb-6">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20">
             <h2 className="mb-1 text-left text-sm font-medium text-slate-400">
               Throughput by event type
             </h2>
@@ -352,7 +384,17 @@ function App() {
             </p>
             <MultiSeriesThroughputChart buckets={throughputBuckets} />
           </section>
+        </div>
 
+        <div className="mb-6">
+          <ActiveAlertsPanel
+            items={activeAlerts}
+            onClear={clearActiveAlerts}
+            onOpenEventId={(id) => setDetailEventId(id)}
+          />
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20">
             <h2 className="mb-4 text-left text-sm font-medium text-slate-400">
               Error rate
@@ -385,7 +427,10 @@ function App() {
 
           <section className="lg:col-span-2">
             {anomalies.length > 0 ? (
-              <AnomalyTimelineChart items={anomalies} />
+              <AnomalyTimelineChart
+                items={anomalies}
+                onViewEventId={(id) => setDetailEventId(id)}
+              />
             ) : (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-500 shadow-xl shadow-black/20">
                 <p className="mb-1 font-medium text-slate-400">

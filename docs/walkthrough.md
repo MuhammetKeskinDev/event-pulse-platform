@@ -56,7 +56,7 @@ Bu zincirde “P95 &lt; 200 ms” beklentisi özellikle **adım 1–2** için ta
 
 ## Yük testi ve başarı ölçütü: `load-gen` + P95
 
-Projede **`npm run load-gen`** (`scripts/load-gen.ts`), Appendix A ile uyumlu rastgele `page_view`, `purchase`, `error`, `system_health` olaylarını hedef URL’ye gönderir. Varsayılanlar kabaca **100 istek/saniye** hedefi ve binlerce toplam istek üzerinden **sürdürülebilir basınç** üretmek içindir; çalışma sonunda özet istatistik (başarılı/başarısız sayıları, süre, **ortalama** yanıt süresi, gerçekleşen evt/s) yazdırılır.
+Projede **`npm run load-gen`** (`tests/load/load-gen.ts`), Appendix A ile uyumlu rastgele `page_view`, `purchase`, `error`, `system_health` olaylarını hedef URL’ye gönderir. Varsayılanlar kabaca **100 istek/saniye** hedefi ve binlerce toplam istek üzerinden **sürdürülebilir basınç** üretmek içindir; çalışma sonunda özet istatistik (başarılı/başarısız sayıları, süre, **ortalama** yanıt süresi, gerçekleşen evt/s) yazdırılır.
 
 **Başarı kriteri (vaka / mimari hedef):** Kabul katmanında **P95 gecikme &lt; 200 ms** — yük altında bile çoğu istemci hızlı bir kabul görmelidir.
 

@@ -1,3 +1,5 @@
+import type { Logger } from "pino";
+
 export type AlertRuleRow = {
   id: string;
   name: string;
@@ -26,4 +28,17 @@ export interface RuleTriggeredPublisher {
 
 export interface SlackOutbound {
   postJson(webhookUrl: string, body: unknown): Promise<{ ok: boolean }>;
+}
+
+/** PDF §3.4 — e-posta kanalı P2: gönderim yerine yapılandırılmış log. */
+export interface EmailNotificationStub {
+  logDelivery(
+    log: Logger,
+    params: {
+      ruleId: string;
+      ruleName: string;
+      channelHint: string | null;
+      body: string;
+    },
+  ): void;
 }

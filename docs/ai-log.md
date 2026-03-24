@@ -4,7 +4,7 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 19 |
+| **Total AI interactions logged** | 20 |
 | **Tools used** | Gemini, Cursor |
 | **Estimated time saved** | ~510 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
@@ -22,7 +22,7 @@
 
 **Context:** Projenin başlangıcı, teknoloji seçimi ve senior düzeyinde bir çalışma planı oluşturulması.
 
-**Prompt:** "8 saatlik bir senior developer case study için en verimli teknoloji stack'ini, IDE seçimini ve proje klasör yapısını belirle, gerekçelendir."
+**Prompt:** " bir senior developer case study için en verimli teknoloji stack'ini, IDE seçimini ve proje klasör yapısını belirle, gerekçelendir."
 
 **AI Output Summary:** TypeScript (Fastify), PostgreSQL (TimescaleDB), Redis Streams önerildi. Proje iskeleti için hiyerarşik klasör yapısı sunuldu.
 
@@ -339,6 +339,40 @@
 **Quality:** 5/5 — PDF P0/NFR ile hizalı, katmanlar ayrıldı.
 
 **Time Impact:** Saved ~120 minutes (tahmini).
+
+### AI-019 | 2026-03-23 (FR-12 export + UI hizalama) | Cursor
+
+**Category:** Feature delivery (FR-12) & dashboard polish
+
+**Context:** PDF FR-12: yapılandırılabilir zaman aralığı ile olayların CSV/PDF dışa aktarımı; dashboard filtre çubuğunda export paneli; canlı akışta genişletilebilir payload (PDF §3.3). Önceki oturumda `docs/ai-log.md` bu iş paketi için güncellenmemişti; kullanıcı hizalama ve log talebiyle birlikte tamamlandı.
+
+**Prompt:** FR-12 ekleme; frontend’de eksik kalanlar kontrolü; ardından “kutular aynı hizada olsun” ve AI log’a yazılıp yazılmadığının sorulması.
+
+**AI Output Summary:** **Backend:** `GET /api/v1/events/export` (`format=csv|pdf`, zorunlu `from`/`to`, isteğe bağlı `event_type`, `source`, `limit` 1–10000); `src/lib/events-where.ts` ortak WHERE; `src/lib/events-export-body.ts` (CSV BOM + kaçış, `pdf-lib` ile PDF); `events-routes` içinde export rotası `/:id` önünde; `pdf-lib` bağımlılığı; `root` indeksinde `events_export`; `docs/api.md` satırı. **Frontend:** `dashboardWindowIso` (`useMetrics`), `buildEventsExportUrl`, filtre satırında export; `LiveEventFeed` chevron ile payload açılır panel. **Hizalama (bu tur):** filtre çubuğu `items-end` → `items-start` (uzun export sütunu kısa filtreleri aşağı itmesin); export sütunu diğerleriyle aynı `flex flex-col gap-1` + üst satır başlık / alt satır kontroller; format `select` için `px-3 py-2`; indirme butonu `h-[42px]` ile select ile hizalı yükseklik.
+
+**Your Modifications:** —
+
+**Validation:** `src` ve `frontend` için `npm run build`. Export’ta `internal_server_error` görülürse: API’nın güncel kod + `npm install` (pdf-lib) ile çalıştığından ve veritabanının erişilebilir olduğundan emin olun; ayrıntı için API log (`events_export_failed`).
+
+**Quality:** 5/5 — FR-12 uçtan uca; log gecikmesi AI-019 ile kapatıldı.
+
+**Time Impact:** Saved ~45 minutes (tahmini, FR-12 + hizalama + log).
+
+**— AI-019 (Compliance Polish) eki — PDF v2.0 strict match**
+
+**Category:** Compliance, API tamamlama, P2 stub, repo yapısı
+
+**Prompt:** “EventPulse Final Compliance & Polish (PDF v2.0 Strict Match)” — Active Alerts paneli + anomali satır click-through; rules full CRUD; metrics `p95`/`p99` stub; e-posta log stub; `load-gen` → `tests/load/`; `architecture.md` FR-10/FR-11 taslakları; sürecin AI log’a işlenmesi.
+
+**AI Output Summary:** **Dashboard:** `ActiveAlertsPanel`, `useMetrics` içinde `rule_triggered` ile `activeAlerts` (son 50), Clear + olay detayına link; `RecentAnomalies` satır tıklaması (`exemplar_event_id` varken) + klavye + açıklama metni. **API:** `GET/PUT/DELETE /api/v1/rules/:id`, `uuid-param` yardımcısı; `GET /api/v1/metrics` gövdesine `latency_ms_percentiles` stub. **Bildirim:** `EmailNotificationStub` portu, `LoggingEmailNotificationStub` (`channel_hint` = `email_stub` | `email_log` → `email_notification_stub` log); `evaluate-alert-rules` + `rule-engine` bağlandı; birim testi. **Yapı:** `tests/load/load-gen.ts`, kök `package.json` script güncellemesi; `scripts/load-gen.ts` kaldırıldı. **Dokümantasyon:** `docs/api.md`, `docs/architecture.md` (FR-10/FR-11), `root` endpoint haritası.
+
+**Your Modifications:** —
+
+**Validation:** `src` `npm run build`; `frontend` `npm run build`; kök `npm test`.
+
+**Quality:** 5/5 — PDF §3.3–3.5 ve §6.1 ile hizalı polish.
+
+**Time Impact:** Saved ~90 minutes (tahmini).
 
 ---
 

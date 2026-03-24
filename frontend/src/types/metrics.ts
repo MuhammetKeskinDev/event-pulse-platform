@@ -17,6 +17,13 @@ export interface MetricsResponse {
     error_events: number
     error_rate_percent: number
   }
+  /** PDF §3.5 — ingestion gecikme yüzdelikleri (APM öncesi stub). */
+  latency_ms_percentiles?: {
+    p95_ms: number
+    p99_ms: number
+    scope: string
+    source: string
+  }
 }
 
 export interface ThroughputPoint {

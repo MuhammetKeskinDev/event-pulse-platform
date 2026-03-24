@@ -119,3 +119,33 @@ Kod tabanı **TypeScript** ile yazılır; **katı tip güvenliği** (ör. `any` 
 | Kalite çubuğu | TypeScript (strict) | Sürdürülebilirlik ve üretim güvenliği |
 
 Bu belge, `docs/api.md` ve dağıtım/runbook dokümanlarıyla birlikte okunmalıdır; somut endpoint’ler ve altyapı diyagramları ilgili dosyalarda güncellenir.
+
+---
+
+## Mimari taslaklar (P2 — PDF v2.0)
+
+### FR-10 — Kimlik doğrulama ve RBAC (uygulanmadı)
+
+**Amaç:** `admin` / `viewer` / `api_consumer` rolleri; ingestion ve sorgu uçları için politikalar.
+
+**Önerilen katmanlar:**
+
+1. **API ağ geçidi veya Fastify hook:** `Authorization: Bearer <JWT>` veya API anahtarı; istek bağlamına `principal: { sub, roles[] }` eklenir.
+2. **Yetkilendirme:** Route şemasına `preHandler` ile rol kontrolü (ör. `POST /rules` yalnızca `admin`; `GET /metrics` `viewer`+).
+3. **Depolama:** `users` / `api_keys` tabloları veya harici IdP (Auth0, Keycloak); JWT imza doğrulama için JWKS önbelleği.
+4. **Dashboard:** Oturum çerezi veya aynı JWT’yi `Authorization` ile Vite proxy üzerinden iletmek.
+
+**Durum:** Şu an kod tabanında auth yok; üretim öncesi zorunlu.
+
+### FR-11 — Olay yeniden oynatma (replay) (uygulanmadı)
+
+**Amaç:** Geçmiş `events` satırlarını güncellenmiş kural motorundan tekrar geçirmek.
+
+**Önerilen akış:**
+
+1. **Okuma:** TimescaleDB’den `occurred_at` aralığı + isteğe bağlı `event_type` ile sayfalı `SELECT` (cursor veya `id, occurred_at` bileşik anahtar).
+2. **Yeniden kuyruklama:** Her satır için mevcut `StreamEnvelope` üretilip **ayrı bir Redis stream** (`events_replay`) veya doğrudan worker içi “synthetic consume” fonksiyonuna verilir; üretim akışını kirletmemek için ana `events_stream`’den ayrı tutulması tercih edilir.
+3. **İdempotans:** Replay işlemlerinde anomali/kural yan etkileri için `replay_batch_id` veya “dry_run” bayrağı ile loglama.
+4. **Operasyon:** CLI veya `POST /api/v1/admin/replay` (auth gerekir) ile job başlatma; ilerleme Redis hash veya DB tablosunda.
+
+**Durum:** Uç nokta ve worker hattı yok; DLQ tüketicisi ileride replay kaynağı olabilir.

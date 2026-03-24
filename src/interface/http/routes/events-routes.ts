@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+
 import type { FastifyInstance } from "fastify";
 
 import {
@@ -151,17 +153,28 @@ export function registerEventsRoutes(app: FastifyInstance): void {
             .type("text/csv; charset=utf-8")
             .send(body);
         }
-        const pdfBuf = await buildEventsExportPdf(
-          rows,
-          `${parsed.from} .. ${parsed.to}`,
-        );
+        let pdfBuf: Buffer;
+        try {
+          pdfBuf = await buildEventsExportPdf(
+            rows,
+            `${parsed.from} .. ${parsed.to}`,
+          );
+        } catch (pdfErr) {
+          request.log.error({ err: pdfErr }, "events_export_pdf_failed");
+          return reply.status(503).send({ error: "pdf_generation_failed" });
+        }
+        const pdfBody = Buffer.isBuffer(pdfBuf)
+          ? pdfBuf
+          : Buffer.from(pdfBuf);
+        // Stream: Fastify onSendEnd yalnızca string|Buffer kabul eder; PDF'i pipe ile
+        // göndererek FST_ERR_REP_INVALID_PAYLOAD_TYPE → 500 riskini kaldırırız.
         return reply
           .header(
             "Content-Disposition",
             `attachment; filename="events-${stamp}.pdf"`,
           )
           .type("application/pdf")
-          .send(pdfBuf);
+          .send(Readable.from(pdfBody));
       } catch (err) {
         request.log.error({ err }, "events_export_failed");
         return reply.status(503).send({ error: "events_unavailable" });

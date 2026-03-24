@@ -8,6 +8,7 @@ import { parseRuleDefinition } from "../../domain/rules/rule-types";
 import type { RuleCooldownTracker } from "../../domain/rules/cooldown-tracker";
 import type {
   AlertRuleRepository,
+  EmailNotificationStub,
   EventWindowCounter,
   RuleTriggeredPublisher,
   SlackOutbound,
@@ -18,6 +19,7 @@ export type EvaluateAlertRulesDeps = {
   counter: EventWindowCounter;
   publisher: RuleTriggeredPublisher;
   slack: SlackOutbound;
+  emailStub: EmailNotificationStub;
   cooldown: RuleCooldownTracker;
 };
 
@@ -118,5 +120,12 @@ export async function evaluateAlertRulesUseCase(
         log.warn({ err }, "slack_webhook_failed");
       }
     }
+
+    deps.emailStub.logDelivery(log, {
+      ruleId: rule.id,
+      ruleName: rule.name,
+      channelHint: rule.channel_hint,
+      body: msg,
+    });
   }
 }

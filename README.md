@@ -4,7 +4,7 @@
 
 **Vizyon:** Yüksek hacimli olayları güvenilir biçimde toplayan, **Redis Streams** ile API’den ayıran ve **TimescaleDB** üzerinde zaman serisi olarak saklayan bir platform. Amaç; operatörün metrik ve anomalileri görebildiği, kabul katmanında **P95 gecikmesinin 200 ms altında** tutulması hedeflenen (vaka gereksinimi) olay altyapısı sunmaktır.
 
-**Ne içerir:** Fastify + TypeScript — **tekil + batch** ingestion, **OpenAPI `/docs`**, **pipeline health**, **DLQ** (3 deneme sonrası), **event sorgu API**, **rules** tablosu (stub CRUD), throughput **zaman kovaları** (`/metrics/throughput`), stream worker, WebSocket + **in-app toast**, Z-score anomali, Vitest, `load-gen` / `seed-db`, **Dockerfile + docker-compose** ile API ve worker konteynerleri.
+**Ne içerir:** Fastify + TypeScript — **tekil + batch** ingestion, **OpenAPI `/docs`**, **pipeline health**, **DLQ** (3 deneme sonrası), **event sorgu API**, **rules** tam CRUD (`/api/v1/rules`, `/api/v1/rules/:id`), throughput **zaman kovaları** (`/metrics/throughput`), stream worker, WebSocket + **in-app toast**, Z-score anomali, Vitest, `tests/load/load-gen` / `seed-db`, **Dockerfile + docker-compose** ile API ve worker konteynerleri.
 
 ---
 
@@ -128,7 +128,7 @@ API çalışırken, kök dizinde:
 npm run load-gen
 ```
 
-Hedef hız ve hacim: `RATE`, `TOTAL`, `API_BASE` ortam değişkenleri (`scripts/load-gen.ts`). **P95 &lt; 200 ms** vaka hedefi için üretim öncesi ortamda histogram tabanlı araçlarla doğrulama önerilir; ayrıntı: [`docs/walkthrough.md`](docs/walkthrough.md).
+Hedef hız ve hacim: `RATE`, `TOTAL`, `API_BASE` ortam değişkenleri (`tests/load/load-gen.ts`, PDF §6.1). **P95 &lt; 200 ms** vaka hedefi için üretim öncesi ortamda histogram tabanlı araçlarla doğrulama önerilir; ayrıntı: [`docs/walkthrough.md`](docs/walkthrough.md).
 
 ---
 

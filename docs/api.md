@@ -32,6 +32,7 @@
 - **`all_time`:** `from`/`to` verilmişse aynı aralığın toplamı; verilmemişse tüm tablo.
 - **`suggested_poll_interval_seconds`:** `10` (önerilen poll aralığı).
 - **`refreshed_at`:** Yanıtın üretildiği an.
+- **`latency_ms_percentiles`:** PDF §3.5 ile uyum için ingestion yanıt gecikmesi **p95 / p99** (ms) ve `source` (ör. `design_stub_until_apm`). APM/gateway histogram bağlanınca gerçek ölçüme çevrilebilir.
 
 ### Hatalar
 
@@ -87,14 +88,17 @@ Kural tetiklenince (worker):
 | `GET` | `/api/v1/events/export` | **FR-12:** `format` = `csv` \| `pdf` (zorunlu); `from` / `to` (ISO-8601, zorunlu); isteğe bağlı `event_type`, `source`, `limit` (1–10000, varsayılan 5000). **200:** dosya indirme (`Content-Disposition: attachment`). **400:** `invalid_export_format`, `export_requires_from_and_to`, `invalid_time_range`, `invalid_time_range_order`. |
 | `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). Yanıtta `payload`, `source`, `metadata` (JSON). |
 
-## Rules — motor (PDF FR-04 / FR-07)
+## Rules — motor (PDF FR-04 / FR-07 / §3.5 full CRUD)
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|--------|
-| `GET` | `/api/v1/rules` | `alert_rules` tablosu (migrasyon `04_rules_retention.sql` gerekir). |
-| `POST` | `/api/v1/rules` | `{ "name", "definition"?, "enabled"?, "channel_hint"? }` — **201**. |
+| `GET` | `/api/v1/rules` | Liste (en fazla 200); öğe alanları: `id`, `name`, `definition`, `enabled`, `channel_hint`, `created_at`, `updated_at`. |
+| `POST` | `/api/v1/rules` | `{ "name", "definition"?, "enabled"?, "channel_hint"? }` — **201** + `{ id, status }`. |
+| `GET` | `/api/v1/rules/:id` | Tek kural (**200** / **404** `rule_not_found` / **400** `invalid_rule_id`). |
+| `PUT` | `/api/v1/rules/:id` | Kısmi güncelleme; en az bir alan: `name`, `definition`, `enabled`, `channel_hint` (null ile temizleme). **200** gövde güncel kural; **422** boş gövde. |
+| `DELETE` | `/api/v1/rules/:id` | **204**; **404** yoksa. |
 
-**`definition`:** `event_match` veya `count_threshold` (worker); `cooldown_seconds`, `severity`. Slack: `SLACK_WEBHOOK_URL` veya `channel_hint` (https).
+**`definition`:** `event_match` veya `count_threshold` (worker); `cooldown_seconds`, `severity`. **Slack:** `SLACK_WEBHOOK_URL` veya `channel_hint` (`https://…`). **E-posta P2 stub (PDF §3.4):** `channel_hint` = `email_stub` veya `email_log` iken gerçek SMTP yok; worker log’unda `email_notification_stub` (yapılandırılmış `log.info`).
 
 ## Anomalies (FR-09 P1)
 

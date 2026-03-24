@@ -19,10 +19,7 @@ function rowToCsvLine(row: {
   source: string;
   payload: unknown;
 }): string {
-  const payloadStr =
-    row.payload === undefined || row.payload === null
-      ? ""
-      : JSON.stringify(row.payload);
+  const payloadStr = safeJsonForExport(row.payload);
   return [
     csvEscapeCell(row.id),
     csvEscapeCell(row.occurred_at),
@@ -50,6 +47,17 @@ function iso(d: Date): string {
 
 function asciiSafe(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, "?");
+}
+
+function safeJsonForExport(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[payload not serializable]";
+  }
 }
 
 function chunkLines(s: string, chunk: number): string[] {
@@ -84,11 +92,23 @@ export async function buildEventsExportPdf(
   const drawLine = (text: string, size: number) => {
     const safe = asciiSafe(text);
     for (const part of chunkLines(safe, 95)) {
+      if (part.length === 0) {
+        continue;
+      }
       if (y < marginBottom) {
         page = doc.addPage([pageW, pageH]);
         y = pageH - 50;
       }
-      page.drawText(part, { x: left, y, size, font });
+      try {
+        page.drawText(part, { x: left, y, size, font });
+      } catch {
+        page.drawText("[unprintable line omitted]", {
+          x: left,
+          y,
+          size,
+          font,
+        });
+      }
       y -= size + 3;
     }
   };
@@ -101,10 +121,7 @@ export async function buildEventsExportPdf(
   const maxPdfRows = Math.min(rows.length, 500);
   for (let i = 0; i < maxPdfRows; i += 1) {
     const r = rows[i]!;
-    const payloadStr =
-      r.payload === undefined || r.payload === null
-        ? ""
-        : JSON.stringify(r.payload);
+    const payloadStr = safeJsonForExport(r.payload);
     const one = `${r.occurred_at} | ${r.event_type} | ${r.source ?? ""} | ${r.id} | ${payloadStr.slice(0, 500)}`;
     drawLine(one, bodySize);
   }
