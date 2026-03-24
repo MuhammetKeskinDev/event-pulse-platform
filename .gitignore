@@ -9,3 +9,6 @@ coverage/
 
 .env
 .env.local
+
+# Yerel export / curl denemeleri (repoya girmesin)
+export-test.pdf
