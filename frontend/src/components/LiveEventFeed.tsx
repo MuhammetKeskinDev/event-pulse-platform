@@ -26,6 +26,14 @@ export function LiveEventFeed({ items }: Props) {
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-mono text-sky-300">{row.event_type}</span>
+                {row.source ? (
+                  <>
+                    <span className="text-slate-600">·</span>
+                    <span className="font-mono text-amber-200/90">
+                      {row.source}
+                    </span>
+                  </>
+                ) : null}
                 <span className="text-slate-600">·</span>
                 <time className="text-slate-500" dateTime={row.occurred_at}>
                   {new Date(row.occurred_at).toLocaleString()}
