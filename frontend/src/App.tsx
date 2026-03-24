@@ -104,7 +104,7 @@ function App() {
         {
           eventType: eventTypeFilter || undefined,
           source: sourceFilter || undefined,
-          limit: Math.min(10_000, Math.max(1, Math.round(exportRowLimit))),
+          limit: Math.max(1, Math.round(exportRowLimit)),
         },
       )
       const res = await fetch(url)
@@ -199,6 +199,10 @@ function App() {
             {error} — Retrying on the next WS message.
           </div>
         ) : null}
+
+        <div className="mb-6">
+          <SystemHealthPanel health={health} />
+        </div>
 
         <div className="mb-6 flex flex-wrap items-start gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 px-4 py-4">
           <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
@@ -328,14 +332,13 @@ function App() {
                 <input
                   type="number"
                   min={1}
-                  max={10000}
                   value={exportRowLimit}
                   onChange={(e) => {
                     const v = Number.parseInt(e.target.value, 10)
                     if (!Number.isFinite(v)) {
                       return
                     }
-                    setExportRowLimit(Math.min(10_000, Math.max(1, v)))
+                    setExportRowLimit(Math.max(1, v))
                   }}
                   className="w-[4.5rem] rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-center font-mono text-sm text-slate-100"
                   aria-label="Export row limit"
@@ -357,7 +360,8 @@ function App() {
             </div>
             <p className="text-[10px] leading-snug text-slate-600">
               Uses dashboard time range + event type + source (not severity).
-              API cap 1–10000 rows.
+              Row count via <code className="font-mono">limit</code> (≥ 1;
+              default 5000 if omitted).
             </p>
             {exportError ? (
               <p className="text-[11px] text-red-300" role="alert">
@@ -365,10 +369,6 @@ function App() {
               </p>
             ) : null}
           </div>
-        </div>
-
-        <div className="mb-6">
-          <SystemHealthPanel health={health} />
         </div>
 
         <div className="mb-6">

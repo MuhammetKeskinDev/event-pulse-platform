@@ -165,7 +165,7 @@ Son **15 tam dakika** baseline, son tamamlanmış **1 dakika** hacmi ile karşı
 ## Bilinen sınırlar (PDF P2 / sonraki sprint)
 
 - **FR-07:** Slack — worker `SLACK_WEBHOOK_URL` veya kural `channel_hint` (https URL) ile webhook POST; e-posta yok.
-- **FR-10 / FR-11 / FR-12:** Auth, replay, CSV/PDF export — tasarlanmış, uygulanmadı.
+- **FR-10 / FR-11:** Kimlik doğrulama (RBAC) ve olay replay — tasarlanmış, uygulanmadı. **FR-12** (CSV/PDF export) uygulanmıştır.
 - **PDF Appendix A:** Üst seviye `source` / `metadata` / `timestamp` alan adları yerine mevcut `occurred_at` + payload şeması kullanılıyor (`docs/api.md` Appendix A).
 - **Kural motoru:** Worker `definition` içinde `event_match` ve `count_threshold` okur; tam ifade DSL’si veya PUT/DELETE rules sonraki adımdır.
 - **Test kapsamı:** Anomali + batch şema birim testleri var; %80 satır kapsamı hedefi için ek test önerilir.

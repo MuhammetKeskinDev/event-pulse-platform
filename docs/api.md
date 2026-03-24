@@ -85,7 +85,7 @@ Kural tetiklenince (worker):
 | Yöntem | Yol | Açıklama |
 |--------|-----|--------|
 | `GET` | `/api/v1/events` | Filtre: `event_type`, `from`, `to` (ISO-8601), `limit` (1–100, varsayılan 50), `offset`. Yanıt: `{ items, limit, offset }`. |
-| `GET` | `/api/v1/events/export` | **FR-12:** `format` = `csv` \| `pdf` (zorunlu); `from` / `to` (ISO-8601, zorunlu); isteğe bağlı `event_type`, `source`, `limit` (1–10000, varsayılan 5000). **200:** dosya indirme (`Content-Disposition: attachment`). **400:** `invalid_export_format`, `export_requires_from_and_to`, `invalid_time_range`, `invalid_time_range_order`. |
+| `GET` | `/api/v1/events/export` | **FR-12:** `format` = `csv` \| `pdf` (zorunlu); `from` / `to` (ISO-8601, zorunlu); isteğe bağlı `event_type`, `source`, `limit` (tam sayı ≥ 1, varsayılan 5000; üst sınır `Number.MAX_SAFE_INTEGER`). **200:** dosya indirme (`Content-Disposition: attachment`). **400:** `invalid_export_format`, `export_requires_from_and_to`, `invalid_time_range`, `invalid_time_range_order`. |
 | `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). Yanıtta `payload`, `source`, `metadata` (JSON). |
 
 ## Rules — motor (PDF FR-04 / FR-07 / §3.5 full CRUD)

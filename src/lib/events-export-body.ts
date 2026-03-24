@@ -115,21 +115,14 @@ export async function buildEventsExportPdf(
 
   drawLine("EventPulse - event export", titleSize);
   drawLine(`Range: ${asciiSafe(rangeLabel)}`, bodySize);
-  drawLine(`Rows: ${rows.length} (server row cap may apply)`, bodySize);
+  drawLine(`Rows: ${rows.length}`, bodySize);
   y -= 4;
 
-  const maxPdfRows = Math.min(rows.length, 500);
-  for (let i = 0; i < maxPdfRows; i += 1) {
+  for (let i = 0; i < rows.length; i += 1) {
     const r = rows[i]!;
     const payloadStr = safeJsonForExport(r.payload);
-    const one = `${r.occurred_at} | ${r.event_type} | ${r.source ?? ""} | ${r.id} | ${payloadStr.slice(0, 500)}`;
+    const one = `${r.occurred_at} | ${r.event_type} | ${r.source ?? ""} | ${r.id} | ${payloadStr}`;
     drawLine(one, bodySize);
-  }
-  if (rows.length > maxPdfRows) {
-    drawLine(
-      `... ${rows.length - maxPdfRows} more rows (use CSV export for full data).`,
-      bodySize,
-    );
   }
 
   const bytes = await doc.save();
@@ -165,7 +158,13 @@ export function parseEventsExportQuery(q: Record<string, string | string[] | und
     return { ok: false, status: 400, error: "invalid_time_range_order" };
   }
   const limitRaw = Number.parseInt(singleQueryParam(q.limit) ?? "5000", 10);
-  const limit = Math.min(10_000, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 5000));
+  const limit = Math.max(
+    1,
+    Math.min(
+      Number.MAX_SAFE_INTEGER,
+      Number.isFinite(limitRaw) ? limitRaw : 5000,
+    ),
+  );
   const et = singleQueryParam(q.event_type);
   const src = singleQueryParam(q.source);
   const out: {

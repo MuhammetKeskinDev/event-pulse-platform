@@ -104,7 +104,7 @@ export function registerEventsRoutes(app: FastifyInstance): void {
         tags: ["query"],
         summary: "Export events as CSV or PDF (FR-12)",
         description:
-          "Requires `format` (csv|pdf), `from` and `to` (ISO-8601). Optional: `event_type`, `source`, `limit` (1–10000, default 5000).",
+          "Requires `format` (csv|pdf), `from` and `to` (ISO-8601). Optional: `event_type`, `source`, `limit` (integer ≥ 1, default 5000; capped at Number.MAX_SAFE_INTEGER).",
         querystring: {
           type: "object",
           required: ["format", "from", "to"],
