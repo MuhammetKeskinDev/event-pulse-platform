@@ -2,6 +2,8 @@
 
 Bu belge, EventPulse platformunun teknik mimarisini, alınan kararları ve bu kararların iş ve operasyonel gereksinimlere nasıl karşılık verdiğini özetler.
 
+> **Benim kullanımım:** Bunu “**neden** böyle yaptık?” sorusuna cevap olarak yazdım ve güncelliyorum. “**Şu an ne var?**” listesi için kök [`README.md`](../README.md) ve aşağıdaki **Ürün durumu** bölümüne bakıyorum; kod bazen dokümandan önde gider, o zaman burayı README ile hizalıyorum. Somut URL ve parametreler için [`docs/api.md`](api.md) tek kaynak sayılır.
+
 ---
 
 ## 1. Genel mimari stratejisi
@@ -119,6 +121,14 @@ Kod tabanı **TypeScript** ile yazılır; **katı tip güvenliği** (ör. `any` 
 | Kalite çubuğu | TypeScript (strict) | Sürdürülebilirlik ve üretim güvenliği |
 
 Bu belge, `docs/api.md` ve dağıtım/runbook dokümanlarıyla birlikte okunmalıdır; somut endpoint’ler ve altyapı diyagramları ilgili dosyalarda güncellenir.
+
+---
+
+## Ürün durumu (güncel — README ile hizalı)
+
+**Teslim edilmiş başlıca özellikler:** Tekil ve batch ingestion, Redis Streams + worker + DLQ, TimescaleDB hypertable üzerinde `events` / `anomalies`, metrik ve throughput API’leri, hacim temelli Z-score anomali, WebSocket canlı kanal (`rule_triggered` dahil), React dashboard (zaman aralığı ve filtreler), **CSV ve PDF dışa aktarım** (`GET /api/v1/events/export`), kurallar için HTTP **CRUD** (`/api/v1/rules`, `/api/v1/rules/:id`), Slack webhook ile bildirim, e-posta kanalı için log tabanlı stub.
+
+**Henüz uygulanmayan taslaklar:** Aşağıdaki FR-10 ve FR-11 maddeleri (auth/RBAC ve replay) kodda yoktur; üretim öncesi özellikle kimlik doğrulama planlanmalıdır.
 
 ---
 

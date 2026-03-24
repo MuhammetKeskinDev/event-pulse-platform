@@ -2,6 +2,8 @@
 
 Bu yazı, bir vaka çalışması düzeyinde “günde yaklaşık **iki milyon olay** kabul edebilen, operatörün görebildiği ve zaman serisi olarak sorgulanabilir bir platform” hedefini nasıl **yönetilebilir parçalara** böldüğümüzü anlatır. Okuyucu, HTTP ingestion, kuyruk ve zaman serisi veritabanı kavramlarına aşina bir yazılım mühendisi varsayılır.
 
+**Benim çerçevem:** Bu metin özellikle **kabul–kuyruk–kalıcılık** ayrımına odaklanıyor; üstüne sonra dashboard, export ve kurallar gibi ürün katmanlarını ekledim. Güncel uç listesi ve operatör arayüzü için kök [`README.md`](../README.md) ve [`docs/api.md`](api.md) dosyalarına bakıyorum — walkthrough’u tarihî / kavramsal katman, onları “canlı harita” gibi düşünüyorum.
+
 ---
 
 ## Problem: ölçek tek bir sayı değil
@@ -70,5 +72,7 @@ Pratik kullanım: API ve altyapı ayağa kalktıktan sonra `TOTAL` ve `RATE` ort
 ## Özet
 
 EventPulse yolculuğu, “hızlı bir REST API”den fazlasıdır: **zaman serisi**, **stream tabanlı gevşek bağlantı**, **asıl kaynak (TimescaleDB)** ve **gerçek zamanlı gözlem** katmanlarının bilinçli sıralanmasıdır. Redis Streams ve TimescaleDB seçimleri sihir değildir; birlikte, iki milyonluk ölçeği **parçalayarak** yönetilebilir bir mimari sunar — ve kabul tarafında **P95 &lt; 200 ms** beklentisi, bu tasarımın ölçülebilir sınavıdır.
+
+**Not — güncel repo:** Bu metnin odağı ingestion–kuyruk–zaman serisi ayrımıdır. Bugünkü kodda ayrıca **operatör dashboard’u** (React/Vite), **CSV ve PDF export**, **kurallar için tam HTTP CRUD** ve **WebSocket** ile canlı olay / kural tetik mesajları vardır; uç listesi ve parametreler için [`docs/api.md`](api.md) ve kök [`README.md`](../README.md) güncel kaynaktır.
 
 **İlgili belgeler:** [`docs/architecture.md`](architecture.md), [`docs/api.md`](api.md), [`docs/ai-strategy.md`](ai-strategy.md).

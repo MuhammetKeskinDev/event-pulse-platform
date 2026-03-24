@@ -1,5 +1,11 @@
 # EventPulse — API Özeti
 
+Bu dosyayı ben **hızlı referans** olarak tutuyorum: gerçek şema ve deneme için Swagger UI (`/docs`) açıyorum; burada ise uçları, sorgu parametrelerini ve WebSocket mesaj türlerini tek bakışta görmek istiyorum. Bir şüphe olduğunda `src/interface/http/routes` ve `src/schemas` ile çapraz kontrol ediyorum — tablolar “sözleşme özeti”, kod ise kaynak.
+
+**Şu an bilinçli olarak yok:** Kimlik doğrulama (FR-10). Aşağıdaki tüm uçlar, export dahil, **açık**; bunu üretime taşırmadan önce mutlaka kapatacağım.
+
+---
+
 ## OpenAPI / Swagger (PDF)
 
 | Yöntem | Yol | Açıklama |
@@ -87,6 +93,22 @@ Kural tetiklenince (worker):
 | `GET` | `/api/v1/events` | Filtre: `event_type`, `from`, `to` (ISO-8601), `limit` (1–100, varsayılan 50), `offset`. Yanıt: `{ items, limit, offset }`. |
 | `GET` | `/api/v1/events/export` | **FR-12:** `format` = `csv` \| `pdf` (zorunlu); `from` / `to` (ISO-8601, zorunlu); isteğe bağlı `event_type`, `source`, `limit` (tam sayı ≥ 1, varsayılan 5000; üst sınır `Number.MAX_SAFE_INTEGER`). **200:** dosya indirme (`Content-Disposition: attachment`). **400:** `invalid_export_format`, `export_requires_from_and_to`, `invalid_time_range`, `invalid_time_range_order`. |
 | `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). Yanıtta `payload`, `source`, `metadata` (JSON). |
+
+### Export — ben nasıl uyguladım? (FR-12 ayrıntı)
+
+- **CSV:** UTF-8, dosya başında BOM (`\uFEFF`); `Content-Type: text/csv; charset=utf-8`. Hücre kaçışları RFC’ye uygun.
+- **PDF:** `pdf-lib` ile sunucuda üretiliyor; `Content-Type: application/pdf`. Yanıt gövdesini **Node.js `Readable` stream** olarak gönderiyorum — böylece Fastify’da ikili çıktı yolunda tip uyumsuzluğundan kaynaklanan **500** riskini azalttım.
+- **Satır sayısı:** Sorgu `LIMIT` değeri `limit` parametresinden geliyor; PDF tarafında ekstra “ilk N satır” kesmesi **yok** (gelen satırların tamamı dokümana yazılır). Çok büyük aralık + yüksek `limit` bellek ve süreyi artırır; bunu operasyon olarak ben yönetiyorum.
+- **Payload metni:** CSV ve PDF satırlarında `JSON.stringify` patlarsa (ör. döngüsel yapı) güvenli bir yer tutucu metin yazılıyor; export’un tamamen düşmesini istemiyorum.
+
+**503 gövdeleri (export):**
+
+| `error` | Ne zaman? |
+|---------|-----------|
+| `events_unavailable` | Örn. veritabanı sorgusu veya export akışında genel hata |
+| `pdf_generation_failed` | Yalnızca PDF üretim adımında yakalanan hata |
+
+Dashboard bu endpoint’i seçilen zaman aralığı + `event_type` + `source` ile çağırıyor; **severity filtresi export’a dahil değil** (bilinçli). Detaylı kurulum: kök [`README.md`](../README.md).
 
 ## Rules — motor (PDF FR-04 / FR-07 / §3.5 full CRUD)
 

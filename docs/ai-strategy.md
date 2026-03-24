@@ -4,9 +4,11 @@
 
 Bu metin, EventPulse vaka çalışması sırasında üretken yapay zekâ araçlarını nasıl konumlandırdığımı ve hangi riskleri bilinçli olarak üstlendiğimi özetler. Amaç, “AI her şeyi doğru bilir” varsayımını reddedip, **hız kazanımı ile mühendislik disiplini** arasında sürdürülebilir bir denge tanımlamaktır.
 
-## Kronolojik süreç analizi (AI-001 → AI-012)
+## Süreç analizi — tablo yalnızca ilk blok (AI-001 – AI-012)
 
-Aşağıdaki özet, `docs/ai-log.md` içindeki on iki kayıt boyunca modelin **nerede ivme sağladığını**, **nerede eksik kaldığını** ve **senior mühendis müdahalesinin** nerede devreye girdiğini profesyonel bir çerçevede toplar.
+Tam kronoloji **`docs/ai-log.md` içinde AI-001’den AI-020’ye** kadar tek tek kayıtlıdır; bu bölümdeki tablo ise **bilinçli olarak yalnızca AI-001 – AI-012** fazlarını özetliyor (ilk ingestion → test/seed aşaması). **AI-013 – AI-020** (final sprint, FR-05/12, mimari refaktör, dokümantasyon vb.) aynı dosyada ayrı başlıklar halinde duruyor; burada satır satır tekrar etmiyorum.
+
+Özet: Başlıkta “→ AI-012” ifadesi, **bu tablonun kapsadığı aralık**tır; “tüm proje AI-012’de bitti” anlamına gelmez.
 
 ### Fazlar ve AI’nın katkısı
 
@@ -35,14 +37,14 @@ Bu tabloda görülen ortak tema: **boilerplate, tekrarlayan entegrasyon kablolar
 
 **ioredis / `XREADGROUP` argüman sırası:** TypeScript imzaları ile gerçek komut sözdizimi arasında uyumsuzluk yaşandı. Bu, “tahmin edilen API” yerine **gerçek kütüphane dokümantasyonu ve çalışan bir çağrı** ile doğrulanması gereken bir yüzeydir.
 
-### Senior müdahalesi: ne yaptım?
+### Developer müdahalesi: ne yaptım?
 
 1. **Gerçek motor üzerinde migrasyon:** Şemayı dosyada tartışmak yetmez; `psql` / Docker içi çalıştırma ile TimescaleDB’nin reddettiği PK düzenini erken gördük ve **bileşik birincil anahtar `(id, occurred_at)`** ile düzelttik.
 2. **Tek doğruluk kaynağı:** Kuyruk ile veritabanı sınırını ve 202 Accepted semantiğini yazılı tutarak AI’nın ara sıra önerdiği “tek süreçte her şey” kısayolunu reddettik.
 3. **Entegrasyon testi kapısı:** `RUN_INTEGRATION=1` ile Redis + Postgres açıkken ingestion yolunun gerçekten stream’e yazdığını doğrulayan test (AI-011), regresyon maliyetini düşürür.
 4. **Yük ve seed:** `load-gen` ile şemaya uygun trafik; `seed-db` ile panel ve metriklerin boş olmayan bir ortamda değerlendirilmesi — ikisi de tekrarlanabilir operasyonel disiplin.
 
-Özetle: senior rolü, AI çıktısını **taslak** kabul edip **şema kurallarına, üretici dokümantasyona ve çalışan ortama** karşı kilitlemektir.
+Özetle: developer rolü, AI çıktısını **taslak** kabul edip **şema kurallarına, üretici dokümantasyona ve çalışan ortama** karşı kilitlemektir.
 
 ## Üretkenlik ve sorumluluk ayrımı
 
@@ -85,6 +87,16 @@ Daha genel kısıtlar şunlar:
 Her “AI hatası” aslında iki parçalı bir olaydır: modelin eksik tahmini ve insanın o ana kadar **otomatikleştirmediği** bir kontrol adımı. AI-005’teki hypertable kısıtı, bundan sonra benzer migrasyonlarda “partition anahtarı birincil anahtarda mı?” sorusunu zihinsel kontrol listesine ekledi. Benzer şekilde, Redis komut sırası veya WebSocket ile çok süreçli mimaride pub/sub ihtiyacı gibi konular, bir kez canlı ortamda veya entegrasyon testinde görüldükten sonra **dokümantasyona ve günlüğe** işlenerek kurumsal hafızaya dönüşüyor.
 
 Bu stratejinin ölçütü yalnızca “daha az yazmak” değil; **daha az yanlış tekrarlamak** ve hataları mümkün olduğunca ucuz aşamada yakalamaktır. Üretken yapay zekâ, bu döngüyü hızlandırır — ama döngünün sahibi yine geliştirici ekibidir.
+
+## Teslimat sonrası: export, PDF ve dokümantasyon (ben nereye dokundum?)
+
+Kronoloji tablosu AI-012’ye kadar ilk sprinti özetliyor; sonrasında **FR-12 export**, **kurallar CRUD**, **Active Alerts**, PDF’te **stream ile gönderim**, **export `limit` tavanının kalkması** ve dashboard’da **system health’in üste alınması** gibi işler geldi. Bu parçalarda AI yine iskelet ve diff hızı sağladı; ben özellikle şunları kendim netleştirdim:
+
+- **İkili yanıt / PDF:** “Çalışıyor gibi” görünüp **500** dönen edge case’leri logdan takip ettim; PDF’i `Readable` ile vermek bu sınıfta stabilite sağladı.
+- **Limit politikası:** Sabit 10 000 tavanını ben kaldırmak istedim — büyük export’un maliyetini bilerek API tüketicisine bıraktım (`Number.MAX_SAFE_INTEGER` sadece JS güvenli tam sayı sınırı).
+- **Dokümantasyon:** Kök README’yi **uzun ve birinci şahıs** yazdım; `walkthrough` ve `architecture`’a “güncel repo” notları ekledim ki walkthrough yalnızca ingestion hikâyesi sanılmasın. `api.md` ve `frontend/README` aynı hikâyeyi destekliyor.
+
+Bu bölümü, `docs/ai-log.md` içindeki **AI-020** kaydı ile birlikte okursanız, “model ne üretti / ben ne onayladım” ayrımı güncel kalır.
 
 ## Sonuç
 

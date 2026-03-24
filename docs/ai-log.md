@@ -1,5 +1,7 @@
 # AI Interaction Log - EventPulse Case Study
 
+Bu günlüğü **disiplin için** tutuyorum: AI ile çalışırken bazen her şey hızlı ilerliyor; birkaç gün sonra “bu kararı neden böyle aldık?” sorusuna tek dosyadan cevap vermek istiyorum. Özeti tabloda, ayrıntıyı her `AI-NNN` başlığında birlikte bırakıyorum — bazen “Your Modifications” satırına kendi düzeltmemi not düşüyorum.
+
 ## Summary
 
 | Metric | Value |
@@ -373,6 +375,24 @@
 **Quality:** 5/5 — PDF §3.3–3.5 ve §6.1 ile hizalı polish.
 
 **Time Impact:** Saved ~90 minutes (tahmini).
+
+### AI-020 | 2026-03-24 | Cursor
+
+**Category:** Documentation sync & first-person narration
+
+**Context:** Kök README ve frontend README birinci şahıs ve detaylı hale getirildikten sonra; `api.md`, `architecture`, `ai-strategy`, `walkthrough` ve AI günlüğünün aynı gerçeği anlatması ve eksik teknik notların (export/PDF stream, 503 gövdeleri, auth uyarısı, limit politikası) eklenmesi.
+
+**Prompt:** “diğer dökümanlarada bak ve eklemediğimiz şeyleri ekle ve ben yazmışım gibi yaz”
+
+**AI Output Summary:** `docs/api.md` — kişisel giriş, FR-12 export alt bölümü (CSV BOM, PDF stream, payload güvenliği, 503 tablosu, dashboard notu). `docs/architecture.md` — yazar notu (blockquote). `docs/ai-strategy.md` — AI-012 sonrası teslimatlar ve dokümantasyon alışkanlıkları. `docs/walkthrough.md` — girişe “benim çerçevem” paragrafı. `docs/ai-log.md` — bu kayıt; özet tabloda toplam etkileşim **20** (AI-001 … AI-020).
+
+**Your Modifications:** Tarihleri ve tonu kendi sürecine göre düzenleyebilirsin; teknik iddialar mevcut kodla uyumlu tutuldu.
+
+**Validation:** Route ve export kodu ile çapraz kontrol (`pdf_generation_failed`, `Readable` PDF gönderimi).
+
+**Quality:** 5/5 — Doküman seti README ile hizalı, tekrar okunabilir.
+
+**Time Impact:** Tahmini 25 dakika.
 
 ---
 

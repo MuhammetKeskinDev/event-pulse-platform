@@ -4,5 +4,8 @@ src/dist/
 # Frontend Vite çıktısı (kaynak: frontend/src; üretim: npm run build)
 frontend/dist/
 
+# Vitest coverage raporu (npm run test:coverage)
+coverage/
+
 .env
 .env.local
