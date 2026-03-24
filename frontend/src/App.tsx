@@ -13,11 +13,14 @@ import {
   useMetrics,
   type DashboardWindowPreset,
   type EventTypeFilterOption,
+  type SourceFilterOption,
+  type SeverityFilterOption,
 } from './hooks/useMetrics'
 
 const WINDOW_LABEL: Record<DashboardWindowPreset, string> = {
   15: 'Last 15 minutes',
   60: 'Last 1 hour',
+  360: 'Last 6 hours',
   1440: 'Last 24 hours',
 }
 
@@ -36,7 +39,19 @@ function App() {
     setWindowPreset,
     eventTypeFilter,
     setEventTypeFilter,
+    sourceFilter,
+    setSourceFilter,
+    severityFilter,
+    setSeverityFilter,
   } = useMetrics()
+
+  const filterSummary = [
+    eventTypeFilter ? `type=${eventTypeFilter}` : null,
+    sourceFilter ? `source=${sourceFilter}` : null,
+    severityFilter ? `severity=${severityFilter}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   const anomaliesInSelectedWindow = useMemo(() => {
     if (!metrics?.window) {
@@ -130,6 +145,7 @@ function App() {
             >
               <option value={15}>15 minutes</option>
               <option value={60}>1 hour</option>
+              <option value={360}>6 hours</option>
               <option value={1440}>24 hours</option>
             </select>
           </label>
@@ -149,6 +165,42 @@ function App() {
               <option value="system_health">system_health</option>
             </select>
           </label>
+          <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+            Source
+            <select
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              value={sourceFilter}
+              onChange={(e) =>
+                setSourceFilter(e.target.value as SourceFilterOption)
+              }
+            >
+              <option value="">All sources</option>
+              <option value="web_app">web_app</option>
+              <option value="payment_service">payment_service</option>
+              <option value="api_gateway">api_gateway</option>
+              <option value="mobile_ios">mobile_ios</option>
+              <option value="seed_script">seed_script</option>
+              <option value="unknown">unknown</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+            Anomaly severity
+            <select
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+              value={severityFilter}
+              onChange={(e) =>
+                setSeverityFilter(e.target.value as SeverityFilterOption)
+              }
+            >
+              <option value="">All severities</option>
+              <option value="critical">critical</option>
+              <option value="high">high</option>
+              <option value="medium">medium</option>
+              <option value="low">low</option>
+              <option value="warning">warning</option>
+              <option value="info">info</option>
+            </select>
+          </label>
         </div>
 
         <div className="mb-6">
@@ -162,8 +214,9 @@ function App() {
             </h2>
             <p className="mb-4 text-left text-xs text-slate-600">
               {WINDOW_LABEL[windowPreset]}
-              {eventTypeFilter ? ` · ${eventTypeFilter}` : ''}, 5-minute buckets
-              (GET /api/v1/metrics/throughput).
+              {filterSummary ? ` · ${filterSummary}` : ''}, 5-minute buckets
+              (GET /api/v1/metrics/throughput). Severity applies to anomaly list &
+              timeline only.
             </p>
             <MultiSeriesThroughputChart buckets={throughputBuckets} />
           </section>

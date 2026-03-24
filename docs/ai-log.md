@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 15 |
+| **Total AI interactions logged** | 16 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~420 minutes |
+| **Estimated time saved** | ~445 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -267,6 +267,24 @@
 **Quality:** 5/5 — PDF ile dürüst gap kapatma; geriye dönük uyumluluk için `occurred_at` + DB default `source`.
 
 **Time Impact:** Saved ~90 minutes (tahmini).
+
+### AI-015 | 2026-03-23 (PDF FR-05 dashboard interactivity) | Cursor
+
+**Category:** Code Generation / Documentation correction
+
+**Context:** Senior case study PDF FR-05: zaman aralığında **6 saat** seçeneği; panellerde **event type**, **source** ve **severity** filtreleri. Önceki oturumda kod değişiklikleri yapıldı fakat **AI Interaction Log güncellenmedi** — kullanıcı kuralları ve PDF Bölüm 5 (“her önemli etkileşim loglanmalı”) ile çelişiyordu; bu kayıt hem özelliği hem de bu süreç hatasını belgeler.
+
+**Prompt:** “Önce 6 numarayı yap” (checklist: `feat(dashboard): add 6h preset and source/severity filters`). Sonraki mesaj: AI log’un yazılmaması ve kuralların unutulması üzerine düzeltme talebi.
+
+**AI Output Summary:** **Backend (`src/app.ts`):** `GET /api/v1/metrics` ve `GET /api/v1/metrics/throughput` için `source` query parametresi (`AND ($n::text IS NULL OR source = $n)`); throughput yanıtına `source_filter`. `GET /api/v1/events` için `source` filtresi ve liste öğelerinde `source` alanı. **Frontend:** `DashboardWindowPreset` genişletildi (`360` = 6h); `SourceFilterOption` ve `SeverityFilterOption`; `useMetrics` içinde metrik/throughput/feed URL’lerine `source`, anomali listesine `severity`; `App.tsx` dört seçici + filtre özeti; `LiveEventRow` / `LiveEventFeed` ile kaynak etiketi. `npm run build` (src + frontend) doğrulandı.
+
+**Your Modifications:** Severity yalnızca **anomali API’sine** uygulanır (events tablosunda `severity` yok); throughput altında kullanıcıya kısa açıklama metni eklendi. **Süreç:** Bu değişikliklerin ilk tesliminde `docs/ai-log.md` güncellenmemişti; bilinçli düzeltme olarak AI-015 ile geriye dönük kayıt açıldı — gelecekte her anlamlı AI destekli patch sonrası log güncellemesi rutin yapılacak.
+
+**Validation:** `src` ve `frontend` için `npm run build`; API’de `source` olmadan geriye dönük uyumluluk (opsiyonel parametre).
+
+**Quality:** 4/5 — Özellik PDF ile hizalı; log gecikmesi disiplin açısından eksi, düzeltme ile şeffaflık sağlandı.
+
+**Time Impact:** Saved ~25 minutes (tahmini); log atlama ~5 dakika “borç” + düzeltme maliyeti.
 
 ---
 

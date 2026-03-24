@@ -27,4 +27,5 @@ export interface LiveEventRow {
   event_type: string
   occurred_at: string
   payload: unknown
+  source?: string
 }

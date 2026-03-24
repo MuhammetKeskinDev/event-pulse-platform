@@ -17,8 +17,8 @@ export type WsConnectionState =
   | 'reconnecting'
   | 'closed'
 
-/** Dashboard time range (minutes) — PDF FR-05 */
-export type DashboardWindowPreset = 15 | 60 | 1440
+/** Dashboard time range (minutes) — PDF FR-05 (15m, 1h, 6h, 24h) */
+export type DashboardWindowPreset = 15 | 60 | 360 | 1440
 
 export type EventTypeFilterOption =
   | ''
@@ -26,6 +26,25 @@ export type EventTypeFilterOption =
   | 'purchase'
   | 'error'
   | 'system_health'
+
+/** PDF Appendix A + seed / default `unknown` */
+export type SourceFilterOption =
+  | ''
+  | 'web_app'
+  | 'payment_service'
+  | 'api_gateway'
+  | 'mobile_ios'
+  | 'seed_script'
+  | 'unknown'
+
+export type SeverityFilterOption =
+  | ''
+  | 'critical'
+  | 'high'
+  | 'medium'
+  | 'low'
+  | 'warning'
+  | 'info'
 
 function rangeForPreset(preset: DashboardWindowPreset): {
   from: string
@@ -40,22 +59,29 @@ function metricsUrl(
   from: string,
   to: string,
   eventType: EventTypeFilterOption,
+  source: SourceFilterOption,
 ): string {
   const p = new URLSearchParams({ from, to })
   if (eventType.length > 0) {
     p.set('event_type', eventType)
   }
+  if (source.length > 0) {
+    p.set('source', source)
+  }
   return `${API_BASE}/api/v1/metrics?${p.toString()}`
 }
 
-/** Tablo: zaman penceresine bağlı değil — son N kayıt (dashboard metrikleriyle aynı from/to kullanılmaz). */
 function anomaliesRecentListUrl(
   eventType: EventTypeFilterOption,
+  severity: SeverityFilterOption,
   limit: number,
 ): string {
   const p = new URLSearchParams({ limit: String(limit) })
   if (eventType.length > 0) {
-    p.set("event_type", eventType)
+    p.set('event_type', eventType)
+  }
+  if (severity.length > 0) {
+    p.set('severity', severity)
   }
   return `${API_BASE}/api/v1/anomalies?${p.toString()}`
 }
@@ -69,6 +95,7 @@ function throughputUrl(
   to: string,
   preset: DashboardWindowPreset,
   eventType: EventTypeFilterOption,
+  source: SourceFilterOption,
 ): string {
   const p = new URLSearchParams({
     from,
@@ -79,16 +106,23 @@ function throughputUrl(
   if (eventType.length > 0) {
     p.set('event_type', eventType)
   }
+  if (source.length > 0) {
+    p.set('source', source)
+  }
   return `${API_BASE}/api/v1/metrics/throughput?${p.toString()}`
 }
 
 function recentEventsUrl(
   eventType: EventTypeFilterOption,
+  source: SourceFilterOption,
   limit: number,
 ): string {
   const p = new URLSearchParams({ limit: String(limit) })
   if (eventType.length > 0) {
     p.set('event_type', eventType)
+  }
+  if (source.length > 0) {
+    p.set('source', source)
   }
   return `${API_BASE}/api/v1/events?${p.toString()}`
 }
@@ -112,6 +146,9 @@ export function useMetrics() {
     useState<DashboardWindowPreset>(60)
   const [eventTypeFilter, setEventTypeFilter] =
     useState<EventTypeFilterOption>('')
+  const [sourceFilter, setSourceFilter] = useState<SourceFilterOption>('')
+  const [severityFilter, setSeverityFilter] =
+    useState<SeverityFilterOption>('')
 
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [anomalies, setAnomalies] = useState<AnomalyRow[]>([])
@@ -136,9 +173,12 @@ export function useMetrics() {
 
   const fetchOnce = useCallback(async () => {
     const { from, to } = rangeForPreset(windowPreset)
-    const mRes = await fetch(metricsUrl(from, to, eventTypeFilter), {
-      cache: 'no-store',
-    })
+    const mRes = await fetch(
+      metricsUrl(from, to, eventTypeFilter, sourceFilter),
+      {
+        cache: 'no-store',
+      },
+    )
     if (!mRes.ok) {
       throw new Error(`HTTP ${mRes.status}`)
     }
@@ -160,7 +200,7 @@ export function useMetrics() {
 
     try {
       const tRes = await fetch(
-        throughputUrl(from, to, windowPreset, eventTypeFilter),
+        throughputUrl(from, to, windowPreset, eventTypeFilter, sourceFilter),
         { cache: 'no-store' },
       )
       if (tRes.ok) {
@@ -172,9 +212,12 @@ export function useMetrics() {
     }
 
     try {
-      const eRes = await fetch(recentEventsUrl(eventTypeFilter, 15), {
-        cache: 'no-store',
-      })
+      const eRes = await fetch(
+        recentEventsUrl(eventTypeFilter, sourceFilter, 15),
+        {
+          cache: 'no-store',
+        },
+      )
       if (eRes.ok) {
         const eb = (await eRes.json()) as { items?: LiveEventRow[] }
         setLiveEvents(eb.items ?? [])
@@ -184,9 +227,12 @@ export function useMetrics() {
     }
 
     try {
-      const aRes = await fetch(anomaliesRecentListUrl(eventTypeFilter, 500), {
-        cache: 'no-store',
-      })
+      const aRes = await fetch(
+        anomaliesRecentListUrl(eventTypeFilter, severityFilter, 500),
+        {
+          cache: 'no-store',
+        },
+      )
       if (aRes.ok) {
         const body = (await aRes.json()) as { items: AnomalyRow[] }
         setAnomalies(body.items ?? [])
@@ -194,7 +240,7 @@ export function useMetrics() {
     } catch {
       /* optional */
     }
-  }, [windowPreset, eventTypeFilter])
+  }, [windowPreset, eventTypeFilter, sourceFilter, severityFilter])
 
   useEffect(() => {
     let cancelled = false
@@ -319,7 +365,14 @@ export function useMetrics() {
       .catch((e) =>
         setError(e instanceof Error ? e.message : 'Failed to load metrics'),
       )
-  }, [windowPreset, eventTypeFilter, wsState, fetchOnce])
+  }, [
+    windowPreset,
+    eventTypeFilter,
+    sourceFilter,
+    severityFilter,
+    wsState,
+    fetchOnce,
+  ])
 
   return {
     metrics,
@@ -336,6 +389,10 @@ export function useMetrics() {
     setWindowPreset,
     eventTypeFilter,
     setEventTypeFilter,
+    sourceFilter,
+    setSourceFilter,
+    severityFilter,
+    setSeverityFilter,
     transport: 'websocket' as const,
   }
 }

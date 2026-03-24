@@ -369,6 +369,7 @@ export async function buildServer(options?: { silent?: boolean }) {
             from: { type: "string", description: "ISO-8601 window start" },
             to: { type: "string", description: "ISO-8601 window end" },
             event_type: { type: "string" },
+            source: { type: "string", description: "Originating system filter" },
           },
         },
         response: {
@@ -409,14 +410,23 @@ export async function buildServer(options?: { silent?: boolean }) {
     const etRaw = singleQueryParam(q.event_type);
     const eventTypeFilter =
       etRaw !== undefined && etRaw.length > 0 ? etRaw : null;
+    const srcRaw = singleQueryParam(q.source);
+    const sourceFilter =
+      srcRaw !== undefined && srcRaw.length > 0 ? srcRaw : null;
 
     try {
-      const distParams: unknown[] = [windowStart, windowEnd, eventTypeFilter];
+      const distParams: unknown[] = [
+        windowStart,
+        windowEnd,
+        eventTypeFilter,
+        sourceFilter,
+      ];
       const distSql = `
             SELECT event_type, COUNT(*)::bigint AS count
             FROM events
             WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
               AND ($3::text IS NULL OR event_type = $3)
+              AND ($4::text IS NULL OR source = $4)
             GROUP BY event_type
             ORDER BY count DESC
           `;
@@ -424,7 +434,12 @@ export async function buildServer(options?: { silent?: boolean }) {
       const allParams: unknown[] = [];
       let allSql: string;
       if (hasCustom) {
-        allParams.push(windowStart, windowEnd, eventTypeFilter);
+        allParams.push(
+          windowStart,
+          windowEnd,
+          eventTypeFilter,
+          sourceFilter,
+        );
         allSql = `
             SELECT
               COUNT(*)::bigint AS total,
@@ -432,15 +447,17 @@ export async function buildServer(options?: { silent?: boolean }) {
             FROM events
             WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
               AND ($3::text IS NULL OR event_type = $3)
+              AND ($4::text IS NULL OR source = $4)
           `;
       } else {
-        allParams.push(eventTypeFilter);
+        allParams.push(eventTypeFilter, sourceFilter);
         allSql = `
             SELECT
               COUNT(*)::bigint AS total,
               COUNT(*) FILTER (WHERE event_type = 'error')::bigint AS errors
             FROM events
             WHERE ($1::text IS NULL OR event_type = $1)
+              AND ($2::text IS NULL OR source = $2)
           `;
       }
 
@@ -517,6 +534,7 @@ export async function buildServer(options?: { silent?: boolean }) {
             windowMinutes: { type: "string" },
             bucketMinutes: { type: "string" },
             event_type: { type: "string" },
+            source: { type: "string" },
           },
         },
         response: {
@@ -546,6 +564,9 @@ export async function buildServer(options?: { silent?: boolean }) {
     const etRaw = singleQueryParam(q.event_type);
     const et =
       etRaw !== undefined && etRaw.length > 0 ? etRaw : null;
+    const srcRaw = singleQueryParam(q.source);
+    const src =
+      srcRaw !== undefined && srcRaw.length > 0 ? srcRaw : null;
 
     const bucketWidthSec = bucketMin * 60;
     const now = new Date();
@@ -579,16 +600,17 @@ export async function buildServer(options?: { silent?: boolean }) {
           }>(
             `
           SELECT
-            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $4::bigint) * $4::bigint)::text AS bucket_epoch,
+            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $5::bigint) * $5::bigint)::text AS bucket_epoch,
             event_type,
             COUNT(*)::text AS c
           FROM events
           WHERE occurred_at >= $1::timestamptz AND occurred_at < $2::timestamptz
             AND ($3::text IS NULL OR event_type = $3)
+            AND ($4::text IS NULL OR source = $4)
           GROUP BY 1, 2
           ORDER BY 1 ASC
         `,
-            [windowStart, windowEnd, et, bucketWidthSec],
+            [windowStart, windowEnd, et, src, bucketWidthSec],
           )
         : await app.pg.query<{
             bucket_epoch: string;
@@ -597,16 +619,17 @@ export async function buildServer(options?: { silent?: boolean }) {
           }>(
             `
           SELECT
-            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $3::bigint) * $3::bigint)::text AS bucket_epoch,
+            ((floor(EXTRACT(EPOCH FROM occurred_at))::bigint / $4::bigint) * $4::bigint)::text AS bucket_epoch,
             event_type,
             COUNT(*)::text AS c
           FROM events
           WHERE occurred_at >= NOW() - ($1::int * INTERVAL '1 minute')
             AND ($2::text IS NULL OR event_type = $2)
+            AND ($3::text IS NULL OR source = $3)
           GROUP BY 1, 2
           ORDER BY 1 ASC
         `,
-            [windowMin, et, bucketWidthSec],
+            [windowMin, et, src, bucketWidthSec],
           );
 
       const bucketMap = new Map<number, { counts: Record<string, number> }>();
@@ -641,6 +664,7 @@ export async function buildServer(options?: { silent?: boolean }) {
         window_minutes: windowMinutesReported,
         bucket_minutes: bucketMin,
         event_type_filter: et,
+        source_filter: src,
         buckets,
       });
     } catch (err) {
@@ -768,6 +792,7 @@ export async function buildServer(options?: { silent?: boolean }) {
           type: "object",
           properties: {
             event_type: { type: "string" },
+            source: { type: "string" },
             from: { type: "string" },
             to: { type: "string" },
             limit: { type: "string" },
@@ -801,11 +826,17 @@ export async function buildServer(options?: { silent?: boolean }) {
     let p = 1;
     const where: string[] = ["1=1"];
     const etEv = singleQueryParam(q.event_type);
+    const srcEv = singleQueryParam(q.source);
     const fromEv = singleQueryParam(q.from);
     const toEv = singleQueryParam(q.to);
     if (etEv !== undefined && etEv.length > 0) {
       where.push(`event_type = $${p}`);
       params.push(etEv);
+      p += 1;
+    }
+    if (srcEv !== undefined && srcEv.length > 0) {
+      where.push(`source = $${p}`);
+      params.push(srcEv);
       p += 1;
     }
     if (fromEv !== undefined && fromEv.length > 0) {
@@ -824,7 +855,8 @@ export async function buildServer(options?: { silent?: boolean }) {
       const sql = `
         SELECT id::text AS id, event_type,
                occurred_at,
-               payload
+               payload,
+               source
         FROM events
         WHERE ${where.join(" AND ")}
         ORDER BY occurred_at DESC
@@ -835,6 +867,7 @@ export async function buildServer(options?: { silent?: boolean }) {
         event_type: string;
         occurred_at: Date;
         payload: unknown;
+        source: string;
       }>(sql, params);
 
       return reply.send({
@@ -846,6 +879,7 @@ export async function buildServer(options?: { silent?: boolean }) {
               ? row.occurred_at.toISOString()
               : String(row.occurred_at),
           payload: row.payload,
+          source: row.source,
         })),
         limit,
         offset,
