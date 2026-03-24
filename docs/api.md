@@ -84,7 +84,8 @@ Kural tetiklenince (worker):
 | Yöntem | Yol | Açıklama |
 |--------|-----|--------|
 | `GET` | `/api/v1/events` | Filtre: `event_type`, `from`, `to` (ISO-8601), `limit` (1–100, varsayılan 50), `offset`. Yanıt: `{ items, limit, offset }`. |
-| `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). |
+| `GET` | `/api/v1/events/export` | **FR-12:** `format` = `csv` \| `pdf` (zorunlu); `from` / `to` (ISO-8601, zorunlu); isteğe bağlı `event_type`, `source`, `limit` (1–10000, varsayılan 5000). **200:** dosya indirme (`Content-Disposition: attachment`). **400:** `invalid_export_format`, `export_requires_from_and_to`, `invalid_time_range`, `invalid_time_range_order`. |
+| `GET` | `/api/v1/events/:id` | UUID ile son `occurred_at` satırı (**200** / **404**). Yanıtta `payload`, `source`, `metadata` (JSON). |
 
 ## Rules — motor (PDF FR-04 / FR-07)
 
@@ -99,7 +100,7 @@ Kural tetiklenince (worker):
 
 | Yöntem | Yol | Açıklama |
 |--------|-----|----------|
-| `GET` | `/api/v1/anomalies` | `limit` (1–500, varsayılan 10); isteğe bağlı `from` / `to`, `severity`, `event_type`. **400:** `invalid_from` / `invalid_to`. |
+| `GET` | `/api/v1/anomalies` | `limit` (1–500, varsayılan 10); isteğe bağlı `from` / `to` (`detected_at` aralığı), `severity` (**büyük/küçük harf duyarsız**), `event_type` (verilirse **`event_type` eşleşir veya `*` toplu satırlar** dahil). **400:** `invalid_from` / `invalid_to`. |
 
 **Satır alanları:** `id`, `event_type` (toplam hacim kuralı için `*`), `severity` (`critical`, `high`, `medium`, `low` vb.), `detected_at` (ISO-8601), `description` (çoğunlukla JSON; Z-score kuralı alanları).
 

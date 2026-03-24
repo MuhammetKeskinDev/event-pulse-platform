@@ -4,6 +4,19 @@ import type { AnomalyRow } from '../types/anomaly'
 
 interface Props {
   items: AnomalyRow[]
+  onViewEventId?: (id: string) => void
+}
+
+function parseExemplarEventId(description: string): string | null {
+  try {
+    const o = JSON.parse(description) as { exemplar_event_id?: string }
+    return typeof o.exemplar_event_id === 'string' &&
+      o.exemplar_event_id.length > 0
+      ? o.exemplar_event_id
+      : null
+  } catch {
+    return null
+  }
 }
 
 function formatDescriptionCell(description: string): string {
@@ -55,7 +68,7 @@ function eventTypeLabel(eventType: string): string {
   return eventType
 }
 
-export function RecentAnomalies({ items }: Props) {
+export function RecentAnomalies({ items, onViewEventId }: Props) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 shadow-xl shadow-black/20">
       <div className="mb-4 flex items-center gap-2">
@@ -66,8 +79,10 @@ export function RecentAnomalies({ items }: Props) {
         <span className="text-xs text-slate-600">(FR-09 P1)</span>
       </div>
       <p className="mb-3 text-left text-xs text-slate-600">
-        En son 500 kayıt (üstteki &quot;Time range&quot; bu listeyi kesmez; yalnızca
-        event type filtresi uygulanır).
+        Üstteki zaman aralığı (preset/custom), severity ve event type ile API
+        filtrelenir; toplu hacim anomalileri{' '}
+        <span className="font-mono text-slate-500">*</span> seçili türde de
+        gösterilir. En fazla 500 kayıt.
       </p>
       {items.length === 0 ? (
         <p className="text-sm text-slate-500">No anomalies recorded yet.</p>
@@ -88,6 +103,11 @@ export function RecentAnomalies({ items }: Props) {
                 <th scope="col" className="py-2 font-medium">
                   Description
                 </th>
+                {onViewEventId ? (
+                  <th scope="col" className="py-2 font-medium">
+                    Related event
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -117,6 +137,24 @@ export function RecentAnomalies({ items }: Props) {
                   >
                     {formatDescriptionCell(row.description)}
                   </td>
+                  {onViewEventId ? (
+                    <td className="py-3 align-top">
+                      {(() => {
+                        const eid = parseExemplarEventId(row.description)
+                        return eid ? (
+                          <button
+                            type="button"
+                            className="text-xs font-mono text-sky-400 underline decoration-sky-400/40 hover:text-sky-300"
+                            onClick={() => onViewEventId(eid)}
+                          >
+                            {eid.slice(0, 8)}…
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-600">—</span>
+                        )
+                      })()}
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>

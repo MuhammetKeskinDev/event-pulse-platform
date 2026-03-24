@@ -95,9 +95,16 @@ Kod tabanı **TypeScript** ile yazılır; **katı tip güvenliği** (ör. `any` 
 
 ---
 
-## Kaynak kod yerleşimi (API)
+## Kaynak kod yerleşimi (API — Clean Architecture)
 
-`src/app.ts` yalnızca Fastify örneği, ortak eklentiler (CORS, Swagger, Postgres, Redis, WebSocket), Redis pub/sub aboneliği ve global hata yakalayıcıyı kurar; **HTTP/WS uç noktaları** `src/routes/` altında modüllere ayrılmıştır (`register-routes.ts` üzerinden tek seferde kayıt). Ortak sorgu yardımcıları `src/lib/`, akışa yazma `src/routes/stream-envelope.ts`, iş kuralları ve şemalar sırasıyla `src/services/` ve `src/schemas/` içinde kalır. Bu ayrım PDF’de vurgulanan **bileşen sınırları** ile uyumludur; davranış ve endpoint sözleşmesi değişmez.
+| Katman | Dizin | Sorumluluk |
+|--------|--------|------------|
+| **Domain** | `src/domain/` | Saf tipler ve mantık: olay zarfı, kural modeli/parse, payload eşleşmesi, cooldown, Z-score matematiği, Slack URL çözümü (saf). |
+| **Application** | `src/application/` | Use case’ler ve port arayüzleri: `evaluate-alert-rules`, anomali job girişi, `event-processing` re-export. |
+| **Infrastructure** | `src/infrastructure/` | Timescale/Postgres (kurallar, pencereli sayım, anomali kalıcılığı), Redis (kuyruk + pub), Slack HTTP. |
+| **Interface** | `src/interface/` | Fastify HTTP route’ları (`http/routes/`, `register-routes.ts`), WebSocket istemci hub’ı (`ws/ws-hub.ts`). |
+
+`src/app.ts` bileşim köküdür (Fastify, eklentiler, Redis subscriber, `registerAllRoutes`). İstek doğrulama şemaları `src/schemas/`, HTTP-öncesi yardımcılar `src/lib/`. Worker, `services/rule-engine` ve `services/anomaly-detector` cephelerinden use case + altyapıya bağlanır. PDF v2.0’daki **bileşen sınırları** ile uyumludur.
 
 ---
 

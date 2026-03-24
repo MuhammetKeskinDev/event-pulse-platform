@@ -11,8 +11,8 @@ import type Redis from "ioredis";
 
 import { EVENTS_LIVE_CHANNEL } from "./constants/realtime";
 import { SWAGGER_ROUTE_PREFIX } from "./constants/swagger-route";
-import { broadcastToWebSocketClients } from "./realtime/ws-hub";
-import { registerAllRoutes } from "./routes/register-routes";
+import { broadcastToWebSocketClients } from "./interface/ws/ws-hub";
+import { registerAllRoutes } from "./interface/http/register-routes";
 
 const connectionString =
   process.env.DATABASE_URL ??

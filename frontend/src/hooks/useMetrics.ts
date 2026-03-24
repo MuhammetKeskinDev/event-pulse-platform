@@ -72,11 +72,17 @@ function metricsUrl(
 }
 
 function anomaliesRecentListUrl(
+  from: string,
+  to: string,
   eventType: EventTypeFilterOption,
   severity: SeverityFilterOption,
   limit: number,
 ): string {
-  const p = new URLSearchParams({ limit: String(limit) })
+  const p = new URLSearchParams({
+    limit: String(limit),
+    from,
+    to,
+  })
   if (eventType.length > 0) {
     p.set('event_type', eventType)
   }
@@ -93,14 +99,15 @@ function healthUrl(): string {
 function throughputUrl(
   from: string,
   to: string,
-  preset: DashboardWindowPreset,
+  windowMinutes: number,
   eventType: EventTypeFilterOption,
   source: SourceFilterOption,
 ): string {
+  const w = Math.min(1440, Math.max(15, Math.round(windowMinutes)))
   const p = new URLSearchParams({
     from,
     to,
-    windowMinutes: String(preset),
+    windowMinutes: String(w),
     bucketMinutes: '5',
   })
   if (eventType.length > 0) {
@@ -116,6 +123,8 @@ function recentEventsUrl(
   eventType: EventTypeFilterOption,
   source: SourceFilterOption,
   limit: number,
+  from?: string,
+  to?: string,
 ): string {
   const p = new URLSearchParams({ limit: String(limit) })
   if (eventType.length > 0) {
@@ -124,7 +133,33 @@ function recentEventsUrl(
   if (source.length > 0) {
     p.set('source', source)
   }
+  if (from !== undefined && from.length > 0) {
+    p.set('from', from)
+  }
+  if (to !== undefined && to.length > 0) {
+    p.set('to', to)
+  }
   return `${API_BASE}/api/v1/events?${p.toString()}`
+}
+
+export type TimeRangeMode = 'preset' | 'custom'
+
+function isoToDatetimeLocalValue(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) {
+    return ''
+  }
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function minutesBetween(fromIso: string, toIso: string): number {
+  const a = new Date(fromIso).getTime()
+  const b = new Date(toIso).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) {
+    return 60
+  }
+  return Math.ceil((b - a) / 60_000)
 }
 
 function wsEventsUrl(): string {
@@ -144,6 +179,13 @@ function wsEventsUrl(): string {
 export function useMetrics() {
   const [windowPreset, setWindowPreset] =
     useState<DashboardWindowPreset>(60)
+  const [timeRangeMode, setTimeRangeMode] = useState<TimeRangeMode>('preset')
+  const [customFromIso, setCustomFromIso] = useState(() =>
+    new Date(Date.now() - 60 * 60_000).toISOString(),
+  )
+  const [customToIso, setCustomToIso] = useState(() =>
+    new Date().toISOString(),
+  )
   const [eventTypeFilter, setEventTypeFilter] =
     useState<EventTypeFilterOption>('')
   const [sourceFilter, setSourceFilter] = useState<SourceFilterOption>('')
@@ -172,7 +214,14 @@ export function useMetrics() {
   }, [])
 
   const fetchOnce = useCallback(async () => {
-    const { from, to } = rangeForPreset(windowPreset)
+    const { from, to } =
+      timeRangeMode === 'preset'
+        ? rangeForPreset(windowPreset)
+        : { from: customFromIso, to: customToIso }
+    const throughputWindowMinutes =
+      timeRangeMode === 'preset'
+        ? windowPreset
+        : minutesBetween(from, to)
     const mRes = await fetch(
       metricsUrl(from, to, eventTypeFilter, sourceFilter),
       {
@@ -200,7 +249,13 @@ export function useMetrics() {
 
     try {
       const tRes = await fetch(
-        throughputUrl(from, to, windowPreset, eventTypeFilter, sourceFilter),
+        throughputUrl(
+          from,
+          to,
+          throughputWindowMinutes,
+          eventTypeFilter,
+          sourceFilter,
+        ),
         { cache: 'no-store' },
       )
       if (tRes.ok) {
@@ -213,7 +268,7 @@ export function useMetrics() {
 
     try {
       const eRes = await fetch(
-        recentEventsUrl(eventTypeFilter, sourceFilter, 15),
+        recentEventsUrl(eventTypeFilter, sourceFilter, 15, from, to),
         {
           cache: 'no-store',
         },
@@ -228,7 +283,13 @@ export function useMetrics() {
 
     try {
       const aRes = await fetch(
-        anomaliesRecentListUrl(eventTypeFilter, severityFilter, 500),
+        anomaliesRecentListUrl(
+          from,
+          to,
+          eventTypeFilter,
+          severityFilter,
+          500,
+        ),
         {
           cache: 'no-store',
         },
@@ -240,7 +301,38 @@ export function useMetrics() {
     } catch {
       /* optional */
     }
-  }, [windowPreset, eventTypeFilter, sourceFilter, severityFilter])
+  }, [
+    windowPreset,
+    timeRangeMode,
+    customFromIso,
+    customToIso,
+    eventTypeFilter,
+    sourceFilter,
+    severityFilter,
+  ])
+
+  /** İlk yükleme ve filtre değişimi: WebSocket bağlanmasını beklemeden REST ile veri çek (WS kapalı/proxy sorununda panel boş kalmasın). */
+  useEffect(() => {
+    let cancelled = false
+    void fetchOnce()
+      .then(() => {
+        if (!cancelled) {
+          setError(null)
+          setLoading(false)
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError(
+            e instanceof Error ? e.message : 'Failed to load metrics',
+          )
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fetchOnce])
 
   useEffect(() => {
     let cancelled = false
@@ -367,12 +459,20 @@ export function useMetrics() {
       )
   }, [
     windowPreset,
+    timeRangeMode,
+    customFromIso,
+    customToIso,
     eventTypeFilter,
     sourceFilter,
     severityFilter,
     wsState,
     fetchOnce,
   ])
+
+  const dashboardWindowIso =
+    timeRangeMode === 'preset'
+      ? rangeForPreset(windowPreset)
+      : { from: customFromIso, to: customToIso }
 
   return {
     metrics,
@@ -387,6 +487,20 @@ export function useMetrics() {
     wsState,
     windowPreset,
     setWindowPreset,
+    timeRangeMode,
+    setTimeRangeMode,
+    customFromLocal: isoToDatetimeLocalValue(customFromIso),
+    customToLocal: isoToDatetimeLocalValue(customToIso),
+    setCustomFromLocal: (v: string) => {
+      if (v.length > 0) {
+        setCustomFromIso(new Date(v).toISOString())
+      }
+    },
+    setCustomToLocal: (v: string) => {
+      if (v.length > 0) {
+        setCustomToIso(new Date(v).toISOString())
+      }
+    },
     eventTypeFilter,
     setEventTypeFilter,
     sourceFilter,
@@ -394,5 +508,6 @@ export function useMetrics() {
     severityFilter,
     setSeverityFilter,
     transport: 'websocket' as const,
+    dashboardWindowIso,
   }
 }

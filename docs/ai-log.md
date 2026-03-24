@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 18 |
+| **Total AI interactions logged** | 19 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~475 minutes |
+| **Estimated time saved** | ~510 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -321,6 +321,24 @@
 **Quality:** 5/5 — Tekrarlanabilir build, repo kirlenmesi azalır.
 
 **Time Impact:** Saved ~10 minutes (tahmini).
+
+### AI-018 | 2026-03-23 (Clean Architecture & PDF v2.0 P0 uyumu) | Cursor
+
+**Category:** Architecture & Compliance (PDF v2.0)
+
+**Context:** Senior case study PDF: Clean Architecture katmanları, FR-04 pencereli kural sayımları (ör. son 5 dk hata &gt; eşik), FR-05 custom zaman aralığı ve olay detayı, NFR p95 kanıtı ve kural motoru birim test &gt;%80.
+
+**Prompt:** “Clean Architecture Refactoring & P0 Compliance (PDF v2.0)” — `domain` / `application` / `infrastructure` / `interface`; `count_threshold` genişletmesi (`source`, `payload_match`); `tests/unit/rule-engine.test.ts` + coverage eşiği; dashboard datetime-local + anomali `exemplar_event_id` → `GET /events/:id` modal; `load-gen` p95; dokümantasyon (Architecture & Compliance).
+
+**AI Output Summary:** **`src/domain`:** `events/stream-envelope`, `rules` (parse, payload eşleşmesi, cooldown), `anomaly/zscore-math`, `notifications/resolve-slack-webhook`. **`src/application`:** `use-cases/evaluate-alert-rules`, `anomaly-detection/run-volume-zscore`, `event-processing` (re-export), `ports/alert-rules`. **`src/infrastructure`:** Postgres kural önbelleği + pencereli sayım (JSONB `@>`), Redis publish, Slack fetch, kuyruk `enqueue-envelope`. **`src/interface/http/routes` + `register-routes`**, **`interface/ws/ws-hub`**. `services/rule-engine` ve `services/anomaly-detector` cephe olarak korundu. Anomali açıklamasına `exemplar_event_id`; `GET /api/v1/events/:id` yanıtına `source`/`metadata`. Frontend: preset/custom aralık, `EventDetailModal`, `RecentAnomalies` / `LiveEventFeed` tıklama. `npm run test:coverage` (Vitest v8) kural paketinde ~%86 satır. `scripts/load-gen.ts` p95 çıktısı.
+
+**Your Modifications:** Kullanıcı metninde “AI-015” etiketi istenmişti; **AI-015** tarihsel olarak dashboard filtresi kaydına ait olduğundan bu sprint **AI-018** ile işlendi (çakışmayı önlemek için).
+
+**Validation:** `src` `npm run build`; `frontend` `npm run build`; kök `npm test`, `npm run test:coverage`.
+
+**Quality:** 5/5 — PDF P0/NFR ile hizalı, katmanlar ayrıldı.
+
+**Time Impact:** Saved ~120 minutes (tahmini).
 
 ---
 

@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
-import { Activity, Loader2, Radio } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Activity, Download, Loader2, Radio } from 'lucide-react'
 
 import { AnomalyTimelineChart } from './components/AnomalyTimelineChart'
 import { ErrorRateGauge } from './components/ErrorRateGauge'
+import { EventDetailModal } from './components/EventDetailModal'
 import { EventSummaryTable } from './components/EventSummaryTable'
 import { LiveEventFeed } from './components/LiveEventFeed'
 import { MultiSeriesThroughputChart } from './components/MultiSeriesThroughputChart'
@@ -16,6 +17,7 @@ import {
   type SourceFilterOption,
   type SeverityFilterOption,
 } from './hooks/useMetrics'
+import { buildEventsExportUrl } from './lib/eventsExportUrl'
 
 const WINDOW_LABEL: Record<DashboardWindowPreset, string> = {
   15: 'Last 15 minutes',
@@ -25,6 +27,10 @@ const WINDOW_LABEL: Record<DashboardWindowPreset, string> = {
 }
 
 function App() {
+  const [detailEventId, setDetailEventId] = useState<string | null>(null)
+  const [exportFormat, setExportFormat] = useState<'csv' | 'pdf'>('csv')
+  const [exportBusy, setExportBusy] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const {
     metrics,
     anomalies,
@@ -37,13 +43,27 @@ function App() {
     wsState,
     windowPreset,
     setWindowPreset,
+    timeRangeMode,
+    setTimeRangeMode,
+    customFromLocal,
+    customToLocal,
+    setCustomFromLocal,
+    setCustomToLocal,
     eventTypeFilter,
     setEventTypeFilter,
     sourceFilter,
     setSourceFilter,
     severityFilter,
     setSeverityFilter,
+    dashboardWindowIso,
   } = useMetrics()
+
+  const rangeDescription = useMemo(() => {
+    if (timeRangeMode === 'custom') {
+      return 'Custom range (from / to)'
+    }
+    return WINDOW_LABEL[windowPreset]
+  }, [timeRangeMode, windowPreset])
 
   const filterSummary = [
     eventTypeFilter ? `type=${eventTypeFilter}` : null,
@@ -53,18 +73,7 @@ function App() {
     .filter(Boolean)
     .join(' · ')
 
-  const anomaliesInSelectedWindow = useMemo(() => {
-    if (!metrics?.window) {
-      return anomalies
-    }
-    const start = new Date(metrics.window.start).getTime()
-    const end = new Date(metrics.window.end).getTime()
-    return anomalies.filter((a) => {
-      const t = new Date(a.detected_at).getTime()
-      return t >= start && t <= end
-    })
-  }, [anomalies, metrics?.window])
-
+  /** Anomaliler API'den zaten seçilen zaman aralığı + severity + event_type (tür seçiliyken '*' toplu satırlar dahil) ile gelir. */
   const wsTone =
     wsState === 'open'
       ? 'text-emerald-400'
@@ -79,6 +88,53 @@ function App() {
         : wsState === 'reconnecting'
           ? 'Reconnecting…'
           : 'Offline'
+
+  async function runExport() {
+    setExportError(null)
+    setExportBusy(true)
+    try {
+      const url = buildEventsExportUrl(
+        exportFormat,
+        dashboardWindowIso.from,
+        dashboardWindowIso.to,
+        {
+          eventType: eventTypeFilter || undefined,
+          source: sourceFilter || undefined,
+          limit: 5000,
+        },
+      )
+      const res = await fetch(url)
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`
+        try {
+          const j = (await res.json()) as { error?: string }
+          if (typeof j.error === 'string') {
+            msg = j.error
+          }
+        } catch {
+          /* ignore */
+        }
+        throw new Error(msg)
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition')
+      let filename = `events-export.${exportFormat}`
+      const m = cd?.match(/filename="([^"]+)"/)
+      if (m?.[1]) {
+        filename = m[1]
+      }
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = filename
+      a.rel = 'noopener'
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExportBusy(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
@@ -138,17 +194,55 @@ function App() {
             Time range
             <select
               className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-              value={windowPreset}
+              value={timeRangeMode}
               onChange={(e) =>
-                setWindowPreset(Number(e.target.value) as DashboardWindowPreset)
+                setTimeRangeMode(e.target.value as 'preset' | 'custom')
               }
             >
-              <option value={15}>15 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={360}>6 hours</option>
-              <option value={1440}>24 hours</option>
+              <option value="preset">Preset</option>
+              <option value="custom">Custom (from / to)</option>
             </select>
           </label>
+          {timeRangeMode === 'preset' ? (
+            <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+              Preset
+              <select
+                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                value={windowPreset}
+                onChange={(e) =>
+                  setWindowPreset(
+                    Number(e.target.value) as DashboardWindowPreset,
+                  )
+                }
+              >
+                <option value={15}>15 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={360}>6 hours</option>
+                <option value={1440}>24 hours</option>
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+                From
+                <input
+                  type="datetime-local"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                  value={customFromLocal}
+                  onChange={(e) => setCustomFromLocal(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
+                To
+                <input
+                  type="datetime-local"
+                  className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                  value={customToLocal}
+                  onChange={(e) => setCustomToLocal(e.target.value)}
+                />
+              </label>
+            </>
+          )}
           <label className="flex flex-col gap-1 text-left text-xs text-slate-400">
             Event type
             <select
@@ -201,6 +295,44 @@ function App() {
               <option value="info">info</option>
             </select>
           </label>
+          <div className="flex min-w-[12rem] flex-col gap-1 text-left text-xs text-slate-400">
+            <span>Export reports (FR-12)</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-lg border border-slate-700 bg-slate-950 px-2 py-2 text-sm text-slate-100"
+                value={exportFormat}
+                onChange={(e) =>
+                  setExportFormat(e.target.value as 'csv' | 'pdf')
+                }
+                aria-label="Export format"
+              >
+                <option value="csv">CSV</option>
+                <option value="pdf">PDF</option>
+              </select>
+              <button
+                type="button"
+                disabled={exportBusy}
+                onClick={() => void runExport()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-sky-700/60 bg-sky-950/50 px-3 py-2 text-sm font-medium text-sky-200 hover:bg-sky-900/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {exportBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : (
+                  <Download className="h-4 w-4" aria-hidden />
+                )}
+                Download
+              </button>
+            </div>
+            <p className="text-[10px] leading-snug text-slate-600">
+              Uses dashboard time range + event type + source (not severity).
+              Max 5000 rows.
+            </p>
+            {exportError ? (
+              <p className="text-[11px] text-red-300" role="alert">
+                {exportError}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="mb-6">
@@ -213,7 +345,7 @@ function App() {
               Throughput by event type
             </h2>
             <p className="mb-4 text-left text-xs text-slate-600">
-              {WINDOW_LABEL[windowPreset]}
+              {rangeDescription}
               {filterSummary ? ` · ${filterSummary}` : ''}, 5-minute buckets
               (GET /api/v1/metrics/throughput). Severity applies to anomaly list &
               timeline only.
@@ -252,30 +384,41 @@ function App() {
           </section>
 
           <section className="lg:col-span-2">
-            {anomaliesInSelectedWindow.length > 0 ? (
-              <AnomalyTimelineChart items={anomaliesInSelectedWindow} />
+            {anomalies.length > 0 ? (
+              <AnomalyTimelineChart items={anomalies} />
             ) : (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-sm text-slate-500 shadow-xl shadow-black/20">
                 <p className="mb-1 font-medium text-slate-400">
                   Anomaly timeline
                 </p>
                 <p>
-                  Seçilen zaman aralığında anomali yok. Aşağıdaki tablo, son
-                  kayıtların tamamını (zaman penceresinden bağımsız) listeler.
+                  Seçilen zaman aralığı ve filtrelerle eşleşen anomali yok.
+                  Severity / event type / zamanı değiştirmeyi veya seed/load-gen
+                  ile veri eklemeyi deneyin.
                 </p>
               </div>
             )}
           </section>
 
           <section className="lg:col-span-2">
-            <RecentAnomalies items={anomalies} />
+            <RecentAnomalies
+              items={anomalies}
+              onViewEventId={(id) => setDetailEventId(id)}
+            />
           </section>
 
           <section className="lg:col-span-2">
-            <LiveEventFeed items={liveEvents} />
+            <LiveEventFeed
+              items={liveEvents}
+              onSelectEventId={(id) => setDetailEventId(id)}
+            />
           </section>
         </div>
       </div>
+      <EventDetailModal
+        eventId={detailEventId}
+        onClose={() => setDetailEventId(null)}
+      />
     </div>
   )
 }

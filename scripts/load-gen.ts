@@ -142,6 +142,7 @@ async function main(): Promise<void> {
   let failed = 0;
   let sumMs = 0;
   let latencySamples = 0;
+  const latenciesMs: number[] = [];
   const tStart = Date.now();
 
   const windows = Math.ceil(TOTAL / RATE);
@@ -155,6 +156,7 @@ async function main(): Promise<void> {
       if (r.status === "fulfilled") {
         sumMs += r.value.ms;
         latencySamples += 1;
+        latenciesMs.push(r.value.ms);
         if (r.value.ok) {
           accepted += 1;
         } else {
@@ -175,10 +177,22 @@ async function main(): Promise<void> {
   const achieved = TOTAL / durationSec;
   const avgMs = latencySamples > 0 ? sumMs / latencySamples : 0;
 
+  latenciesMs.sort((a, b) => a - b);
+  /** PDF §2.3 NFR: p95 latency under load — nearest-rank on sorted samples */
+  function percentileP95(sorted: number[]): number {
+    const n = sorted.length;
+    if (n === 0) {
+      return 0;
+    }
+    const rank = Math.ceil(0.95 * n) - 1;
+    return sorted[Math.max(0, Math.min(n - 1, rank))]!;
+  }
+  const p95Ms = percentileP95(latenciesMs);
+
   console.log("— özet —");
   console.log(`süre: ${durationSec.toFixed(2)} s | başarılı (202): ${accepted} | başarısız: ${failed}`);
   console.log(
-    `gerçekleşen ort. hız: ${achieved.toFixed(1)} evt/s | yanıt süresi ort. ${avgMs.toFixed(1)} ms`,
+    `gerçekleşen ort. hız: ${achieved.toFixed(1)} evt/s | yanıt süresi ort. ${avgMs.toFixed(1)} ms | p95 ${p95Ms.toFixed(1)} ms (PDF §2.3)`,
   );
   if (failed > 0) {
     process.exitCode = 1;

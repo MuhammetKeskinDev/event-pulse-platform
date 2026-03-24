@@ -4,7 +4,7 @@ import {
   computeVolumeZScoreDecision,
   sampleStdDev,
   zScoreDistance,
-} from "@src/services/anomaly-detector";
+} from "@src/domain/anomaly/zscore-math";
 
 describe("sampleStdDev", () => {
   it("boş veya tek eleman için 0 döner", () => {
