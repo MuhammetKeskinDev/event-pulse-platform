@@ -95,6 +95,12 @@ Kod tabanı **TypeScript** ile yazılır; **katı tip güvenliği** (ör. `any` 
 
 ---
 
+## Kaynak kod yerleşimi (API)
+
+`src/app.ts` yalnızca Fastify örneği, ortak eklentiler (CORS, Swagger, Postgres, Redis, WebSocket), Redis pub/sub aboneliği ve global hata yakalayıcıyı kurar; **HTTP/WS uç noktaları** `src/routes/` altında modüllere ayrılmıştır (`register-routes.ts` üzerinden tek seferde kayıt). Ortak sorgu yardımcıları `src/lib/`, akışa yazma `src/routes/stream-envelope.ts`, iş kuralları ve şemalar sırasıyla `src/services/` ve `src/schemas/` içinde kalır. Bu ayrım PDF’de vurgulanan **bileşen sınırları** ile uyumludur; davranış ve endpoint sözleşmesi değişmez.
+
+---
+
 ## Özet
 
 | Alan | Seçim | Ana gerekçe |

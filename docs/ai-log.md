@@ -4,9 +4,9 @@
 
 | Metric | Value |
 |--------|-------|
-| **Total AI interactions logged** | 16 |
+| **Total AI interactions logged** | 18 |
 | **Tools used** | Gemini, Cursor |
-| **Estimated time saved** | ~445 minutes |
+| **Estimated time saved** | ~475 minutes |
 | **Most valuable AI use case** | Architectural planning and tech stack selection |
 | **Biggest AI limitation encountered** | Initial context setting for a complex multi-domain problem |
 
@@ -285,6 +285,42 @@
 **Quality:** 4/5 — Özellik PDF ile hizalı; log gecikmesi disiplin açısından eksi, düzeltme ile şeffaflık sağlandı.
 
 **Time Impact:** Saved ~25 minutes (tahmini); log atlama ~5 dakika “borç” + düzeltme maliyeti.
+
+### AI-016 | 2026-03-23 (Backend modülerleştirme) | Cursor
+
+**Category:** Architecture / Refactoring
+
+**Context:** PDF ve önceki plan: `app.ts` tek dosyada ~1200 satır; “component boundaries” ve sürdürülebilirlik için route/lib ayrımı. **Davranış ve uç noktalar değişmeden** sadece dosya sınırları taşındı.
+
+**Prompt:** “PDF’te istenen kod yapısını ve uygulama mantığını bozmadan yap” (önceki mimari planın uygulanması).
+
+**AI Output Summary:** `src/lib/query-params.ts`, `src/lib/metrics-helpers.ts`, `src/constants/swagger-route.ts`, `src/routes/*` (root, health, metrics+throughput, anomalies, events list+by id, rules, ingestion, websocket, `stream-envelope`, `register-routes.ts`). `app.ts` yalnızca Fastify kurulumu, eklentiler, Redis subscriber hook’ları, `registerAllRoutes`, error handler ve `start()`. `buildServer` export’u korundu (`tests` uyumu).
+
+**Your Modifications:** Route kayıt sırası orijinale yakın tutuldu (ingestion POST’lar en sonda). `enqueueEnvelope` tipine opsiyonel `source`/`metadata` eklendi (runtime zaten gönderiyordu).
+
+**Validation:** `npm run build` (`src`), kök `npm test` (birim).
+
+**Quality:** 5/5 — Davranış korunmuş, sınır çizgileri netleşmiş.
+
+**Time Impact:** Saved ~25 minutes (tahmini).
+
+### AI-017 | 2026-03-23 (Git: build çıktıları + commit hazırlığı) | Cursor
+
+**Category:** Repository hygiene / DevOps
+
+**Context:** `src/dist` daha önce repoya commit’lenmişti; `.gitignore` zaten `src/dist/` ve `frontend/dist/` içeriyordu. Hedef: çıktıları versiyon kontrolünden çıkarmak, yerelde/Docker/CI’de `npm run build` ile üretime devam etmek. `frontend/dist` indekste yoktu.
+
+**Prompt:** Commit öncesi; dist klasörlerinin geçmişte commit’lendiği; AI log ve commit mesajı metni istendi.
+
+**AI Output Summary:** `git rm -r --cached src/dist` ile backend derleme çıktıları indeksten kaldırıldı (working tree’de dosyalar kalabilir). `frontend/dist` için pathspec eşleşmedi (takipte değildi). Commit öncesi `node_modules/.vite/...` gibi ara dosyaların stage’e girmemesi için `git restore` önerisi.
+
+**Your Modifications:** —
+
+**Validation:** `git status` ile staged silmelerin yalnızca `src/dist/*` olduğu doğrulanmalı; gerekirse `npm run build` (`src`) ile çıktı yeniden üretilir.
+
+**Quality:** 5/5 — Tekrarlanabilir build, repo kirlenmesi azalır.
+
+**Time Impact:** Saved ~10 minutes (tahmini).
 
 ---
 

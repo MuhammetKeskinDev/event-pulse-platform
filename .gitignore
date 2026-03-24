@@ -1,4 +1,8 @@
 src/node_modules/
 src/dist/
+
+# Frontend Vite çıktısı (kaynak: frontend/src; üretim: npm run build)
+frontend/dist/
+
 .env
 .env.local
